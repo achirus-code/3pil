@@ -219,3 +219,13 @@ async def test_transactions_from_timeline():
     diag = tr.last_timeline
     assert diag["pages"] == 2 and diag["items"] == 8 and diag["held"] == 7 and diag["skipped"] == 2
     assert diag["with_shares"] == 2 and diag["estimated"] == 1 and "Anteile" in diag["detail_titles"]
+
+
+
+def test_find_shares_in_transaction_row():
+    from sw.tr_api import find_shares
+    detail = {"sections": [{"title": "Übersicht", "data": [
+        {"title": "Transaktion", "detail": {"text": "2.805,927158 × 11,51 €", "type": "text"}},
+        {"title": "Gebühr", "detail": {"text": "1,00 €"}}]}]}
+    assert find_shares(detail) == pytest.approx(2805.927158)
+    assert find_shares({"data": [{"title": "Ausführung", "detail": {"text": "38,5 x 4,29 €"}}]}) == pytest.approx(38.5)

@@ -360,6 +360,11 @@ class TradeRepublic:
                 if isinstance(detail, Exception):
                     continue
                 diag["details"] += 1
+                if len(diag.setdefault("transaction_texts", [])) < 3:
+                    for row in _rows(detail):
+                        if row[0].lower() in ("transaktion", "ausführung", "anteile", "aktien") and \
+                                len(diag["transaction_texts"]) < 3:
+                            diag["transaction_texts"].append(f"{row[0]}: {row[1]}")
                 if len(diag["detail_titles"]) < 25:
                     for title in _titles(detail):
                         if title not in diag["detail_titles"] and len(diag["detail_titles"]) < 25:
@@ -610,6 +615,25 @@ def _de_number(text: Any) -> float | None:
         return None
 
 
+def _rows(body: Any, depth: int = 0) -> list[tuple[str, str]]:
+    """(Titel, Text) aller Zeilen mit „title“ und „detail“."""
+    out: list[tuple[str, str]] = []
+    if depth > 8:
+        return out
+    if isinstance(body, dict):
+        if isinstance(body.get("title"), str) and "detail" in body:
+            det = body["detail"]
+            text = det.get("text") if isinstance(det, dict) else det
+            out.append((body["title"], str(text)[:60]))
+        for v in body.values():
+            if isinstance(v, (dict, list)):
+                out.extend(_rows(v, depth + 1))
+    elif isinstance(body, list):
+        for v in body:
+            out.extend(_rows(v, depth + 1))
+    return out
+
+
 def _titles(body: Any, depth: int = 0) -> list[str]:
     """Alle „title“-Texte einer Antwort (für die Diagnose, ohne Beträge)."""
     out: list[str] = []
@@ -627,12 +651,32 @@ def _titles(body: Any, depth: int = 0) -> list[str]:
     return out
 
 
-def find_shares(body: Any, depth: int = 0) -> float | None:
+def find_shares(body: Any) -> float | None:
+    """Stückzahl aus den Details: zuerst „Transaktion: N × Kurs“, sonst eine Zeile „Aktien“/„Anteile“/„Stück“."""
+    for title, text in _rows(body):
+        if title.strip().lower() in ("transaktion", "ausführung", "ausfuehrung", "transaction", "execution"):
+            m = re.match(r"\s*([\d.,]+)\s*(?:×|x|\*)\s*", text or "")
+            if m and (n := _de_number(m.group(1))):
+                return n
+    return _find_shares(body)
+
+
+def _find_shares(body: Any, depth: int = 0) -> float | None:
     """Stückzahl aus den Details einer Transaktion: ein Eintrag mit Titel „Aktien“/„Anteile“/„Stück“."""
     if depth > 8:
         return None
     if isinstance(body, dict):
         title = str(body.get("title") or "").strip().lower()
+        if title in ("transaktion", "ausführung", "ausfuehrung", "transaction", "execution"):
+            # neuere Antwort: „2.805,927158 × 11,51 €“ – Stückzahl vor dem Malzeichen
+            det = body.get("detail")
+            value = det if not isinstance(det, dict) else (
+                det.get("text") or (det.get("displayValue") or {}).get("text") or det.get("value"))
+            m = re.match(r"\s*([\d.,]+)\s*(?:×|x|\*)\s*", str(value or ""))
+            if m:
+                n = _de_number(m.group(1))
+                if n:
+                    return n
         if title in SHARE_TITLES or title.startswith(("anteil", "aktie", "stück")):
             det = body.get("detail")
             value = det if not isinstance(det, dict) else (
@@ -642,12 +686,12 @@ def find_shares(body: Any, depth: int = 0) -> float | None:
                 return n
         for v in body.values():
             if isinstance(v, (dict, list)):
-                r = find_shares(v, depth + 1)
+                r = _find_shares(v, depth + 1)
                 if r is not None:
                     return r
     elif isinstance(body, list):
         for v in body:
-            r = find_shares(v, depth + 1)
+            r = _find_shares(v, depth + 1)
             if r is not None:
                 return r
     return None
