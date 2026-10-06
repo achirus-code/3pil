@@ -1,6 +1,6 @@
 # Home-Assistant-App (früher „Add-on“). Das Image baut der Supervisor beim Installieren aus dem Dockerfile.
 name: Säulenwächter
-version: "2.0.2"
+version: "2.1.0"
 slug: saeulenwaechter
 description: Die 3-Säulen-Strategie (Welt 40 · Gold 30 · Anleihen 30) mit Trade-Republic-Depot und WhatsApp-Meldungen
 url: https://github.com/achirus-code/3pil

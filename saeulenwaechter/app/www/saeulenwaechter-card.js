@@ -257,7 +257,7 @@ class SaeulenBase extends HTMLElement {
     const list = un.length ? `<div class="note warn">Nicht zugeordnet: ${un.map((u) =>
       `${esc(u.name)} (${esc(u.isin)}, ${eur(u.value, 0)})${u.suggestion_name ? " – vermutlich " + esc(u.suggestion_name) : ""}`).join("; ")}.
       In den Optionen unter „Weitere ISINs …“ eintragen, dann zählt die Position zur Säule.</div>` : "";
-    const legend = split ? `<div class="note"><span style="color:var(--sw-tr)">■</span> Aktueller Bestand ${split.source === "paper" ? "im Papierdepot" : "bei Trade Republic (erkannte Positionen"} + Cash = ${eur(split.base, 0)}${split.source === "paper" ? "" : ")"}, Strich = Soll laut aktueller Entscheidung.</div>` : "";
+    const legend = split ? `<div class="note"><span style="color:var(--sw-tr)">■</span> Aktueller Bestand ${split.source === "paper" ? "im Papierdepot" : "bei Trade Republic (erkannte Positionen"}${d.physical_gold && d.physical_gold.items && d.physical_gold.items.length ? " + physisches Gold" : ""} + Cash = ${eur(split.base, 0)}${split.source === "paper" ? "" : ")"}, Strich = Soll laut aktueller Entscheidung.</div>` : "";
     return cash + legend + list;
   }
 

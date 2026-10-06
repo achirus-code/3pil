@@ -13,8 +13,11 @@ import hashlib
 import json
 import logging
 import re
+import time
 import uuid
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -22,7 +25,30 @@ _LOGGER = logging.getLogger(__name__)
 
 HOST = "https://api.traderepublic.com"
 WS_URL = "wss://api.traderepublic.com"
-APP_VERSION = "2.2631.13"
+APP_VERSION = "2.2641.2"  # Rückfall; die aktuelle Version liest detect_app_version() von app.traderepublic.com
+WEB_APP = "https://app.traderepublic.com"
+_app_version: dict[str, Any] = {"value": APP_VERSION, "at": 0.0}
+
+
+async def detect_app_version(session: aiohttp.ClientSession) -> str:
+    """Die Version der TR-Web-App (Trade Republic lehnt veraltete ab). Einmal am Tag aus dem Web-Bundle gelesen."""
+    if time.time() - _app_version["at"] < 24 * 3600:
+        return _app_version["value"]
+    _app_version["at"] = time.time()  # auch bei Fehlern erst morgen wieder versuchen
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with session.get(f"{WEB_APP}/", headers={"User-Agent": USER_AGENT}, timeout=timeout) as resp:
+            html = await resp.text()
+        m = re.search(r'src="(/assets/index-[^"]+\.js)"', html)
+        if m:
+            async with session.get(f"{WEB_APP}{m.group(1)}", headers={"User-Agent": USER_AGENT}, timeout=timeout) as resp:
+                js = await resp.text()
+            v = re.search(r"SENTRY_RELEASE=\{id:`([0-9][0-9.]+)`\}", js)
+            if v:
+                _app_version["value"] = v.group(1)
+    except Exception as err:  # noqa: BLE001 – ohne Web-Version gilt der Rückfall, der Login versucht es trotzdem
+        _LOGGER.debug("TR-Web-Version nicht gelesen: %s", err)
+    return _app_version["value"]
 WEB_PLATFORM = "web-pro"
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
@@ -49,6 +75,12 @@ LOGIN_ERRORS = {
 }
 # Antworten auf den Authenticator-Code, die „Code nicht angenommen“ bedeuten
 CODE_REJECTED = {"AUTHENTICATION_ERROR", "VALIDATION_CODE_INVALID", "INVALID_VALUE"}
+
+
+def _tz_offset() -> int:
+    """Wie JavaScripts getTimezoneOffset() für Europe/Berlin: −60 im Winter, −120 im Sommer."""
+    off = datetime.now(ZoneInfo("Europe/Berlin")).utcoffset()
+    return -int(off.total_seconds() // 60) if off else -60
 
 
 class TRError(Exception):
@@ -78,6 +110,7 @@ class TradeRepublic:
         self.sec_acc_no = sec_acc_no
         self._process_id: str | None = None
         self.required_action: str | None = None
+        self._qr_challenge: str | None = None
 
     # ------------------------------------------------------------------ HTTP
 
@@ -97,13 +130,13 @@ class TradeRepublic:
                 "os": "Linux",
                 "osVersion": "6",
                 "timezone": "Europe/Berlin",
-                "timezoneOffset": -60,
+                "timezoneOffset": _tz_offset(),
                 "screen": "1920x1080x24",
                 "preferredLanguages": ["de"],
                 "numberOfCores": 4,
             }
             h["X-TR-Device-Info"] = base64.b64encode(json.dumps(device).encode()).decode()
-            h["X-TR-App-Version"] = APP_VERSION
+            h["X-TR-App-Version"] = _app_version["value"]
             h["X-Tr-Platform"] = WEB_PLATFORM
             h["Accept-Language"] = "de"
         return h
@@ -149,6 +182,7 @@ class TradeRepublic:
 
     async def login_start(self, phone: str, pin: str) -> str:
         """Startet den Web-Login. Ergebnis: 'AUTHENTICATOR_VERIFICATION' oder 'APP_CONFIRMATION'."""
+        await detect_app_version(self._session)
         self.cookies.clear()
         status, body = await self._request("POST", "/api/v2/auth/web/login", login=True,
                                            json={"phoneNumber": phone, "pin": pin})
@@ -189,6 +223,46 @@ class TradeRepublic:
             if loop.time() > deadline:
                 raise TRAuthError("Noch nicht in der Trade-Republic-App bestätigt.")
             await asyncio.sleep(2)
+
+    # ---------------------------------------------------------- QR-Login
+
+    async def qr_start(self) -> dict:
+        """Startet den QR-Login (ohne PIN): Trade Republic liefert eine Challenge, deren QR-Code die TR-App scannt."""
+        await detect_app_version(self._session)
+        self.cookies.clear()
+        status, body = await self._request("POST", "/api/v2/auth/web/login/qr-challenges", login=True, json={})
+        if status >= 400 or not isinstance(body, dict) or not body.get("challengeId"):
+            raise self._login_error(status, body, "QR")
+        self._qr_challenge = body["challengeId"]
+        return body
+
+    async def qr_poll(self) -> dict:
+        """Status der Challenge: {status: PENDING|CLAIMED|EXPIRED, qrCodePayload, processId, …}.
+
+        Der QR-Inhalt wechselt alle paar Sekunden (Token mit kurzer Laufzeit), deshalb regelmäßig abfragen.
+        """
+        if not self._qr_challenge:
+            raise TRError("QR-Login wurde nicht gestartet.")
+        status, body = await self._request("GET", f"/api/v2/auth/web/login/qr-challenges/{self._qr_challenge}",
+                                           login=True)
+        if status >= 400:
+            code, _ = self._error_code(body)
+            if code == "PROCESS_GONE" or status in (404, 410):
+                return {"status": "EXPIRED"}
+            if code == "TOO_MANY_REQUESTS" or status == 429:
+                return {"status": "PENDING", "throttled": True}
+            raise self._login_error(status, body, "QR-Status")
+        body = body if isinstance(body, dict) else {}
+        if body.get("status") == "CLAIMED" and body.get("processId"):
+            self._process_id = body["processId"]
+        return body
+
+    async def qr_complete(self, wait: float = 120.0) -> None:
+        """Nach dem Scannen: warten, bis die Anmeldung in der TR-App bestätigt ist und die Session steht."""
+        if not self._process_id:
+            raise TRError("Der QR-Code wurde noch nicht gescannt.")
+        await self._wait_for_session(wait, code_sent=True)
+        await self.account()
 
     async def login_complete(self, code: str | None = None, wait: float = 20.0) -> None:
         """Schließt den Login ab: per Authenticator-Code oder Bestätigung in der TR-App."""

@@ -90,6 +90,16 @@ def _date_de(d: date) -> str:
     return f"{d.day}. {MONTHS_DE[d.month - 1]}"
 
 
+GOLD_ISIN = "DE000A0S9GB0"  # Xetra-Gold: ein Anteil = ein Gramm Gold – sein Kurs ist der Goldpreis je Gramm
+TROY_OUNCE_G = 31.1034768
+
+
+def fine_grams(qty: float, unit: str, fineness: float) -> float:
+    """Feingold in Gramm: Menge (g oder oz) × Feingehalt (‰, z. B. 999.9 oder 916.7)."""
+    grams = qty * (TROY_OUNCE_G if unit == "oz" else 1.0)
+    return grams * fineness / 1000
+
+
 def normalize_phone(phone: str) -> str:
     """„0170 1234567“ → „+491701234567“."""
     phone = phone.strip().replace(" ", "").replace("-", "")
@@ -120,6 +130,8 @@ class Engine:
         self._login_client: TradeRepublic | None = None
         self._lock = asyncio.Lock()
         self.last_error: str | None = None
+        self._qr: dict | None = None
+        self.on_login = None  # async Callback nach einem Login im Hintergrund (QR): Entitäten neu senden
 
     def now(self) -> datetime:
         return datetime.now(self.tz)
@@ -207,6 +219,114 @@ class Engine:
             self._login_client = None
             await self.async_save()
         await self.refresh()
+
+    # ------------------------------------------------------- Physisches Gold
+
+    def gold_price_g(self) -> float | None:
+        """Goldpreis je Gramm in Euro (Geldkurs von Xetra-Gold)."""
+        return self._price(GOLD_ISIN).get("bid")
+
+    def physical_gold(self) -> dict:
+        """Selbst eingetragenes Gold mit heutigem Wert. Zählt zur Gold-Säule."""
+        price = self.gold_price_g()
+        items = []
+        for e in self.state.get("physical_gold", []):
+            value = e["fine_grams"] * price if price else None
+            items.append({**e, "value": value, "pnl": value - e["cost"] if value is not None and e.get("cost") else None,
+                          "cost_per_g": e["cost"] / e["fine_grams"] if e.get("cost") and e["fine_grams"] else None})
+        known = [i for i in items if i["value"] is not None]
+        return {"price_g": price, "items": items,
+                "fine_grams": sum(i["fine_grams"] for i in items),
+                "value": sum(i["value"] for i in known) if known else (0.0 if not items else None),
+                "cost": sum(i.get("cost") or 0 for i in items)}
+
+    async def add_physical_gold(self, name: str, qty: float, unit: str, fineness: float, cost: float,
+                                bought: str | None = None) -> dict:
+        if qty <= 0 or not 0 < fineness <= 1000 or cost < 0 or unit not in ("g", "oz"):
+            raise ValueError("Menge > 0, Einheit g oder oz, Feingehalt 1–1000 ‰ und Kaufpreis ≥ 0 angeben.")
+        entry = {"id": os.urandom(6).hex(), "name": (name or "Gold").strip()[:60], "qty": qty, "unit": unit,
+                 "fineness": fineness, "fine_grams": round(fine_grams(qty, unit, fineness), 4),
+                 "cost": round(cost, 2), "bought": bought or None, "added": self.now().isoformat()}
+        async with self._lock:
+            self.state.setdefault("physical_gold", []).append(entry)
+            await self.async_save()
+        await self.refresh()
+        return entry
+
+    async def remove_physical_gold(self, entry_id: str) -> bool:
+        async with self._lock:
+            before = len(self.state.get("physical_gold", []))
+            self.state["physical_gold"] = [e for e in self.state.get("physical_gold", []) if e["id"] != entry_id]
+            removed = len(self.state["physical_gold"]) < before
+            await self.async_save()
+        await self.refresh()
+        return removed
+
+    def _physical_holdings(self) -> list[dict]:
+        """Physisches Gold als Bestand der Gold-Säule (nicht handelbar, keine ISIN)."""
+        price = self.gold_price_g()
+        return [{"isin": "PHYSISCH", "name": f"Physisches Gold · {e['name']}", "physical": True,
+                 "size": e["fine_grams"], "avg_buy": e["cost"] / e["fine_grams"] if e["fine_grams"] else None,
+                 "cost": e["cost"] or None, "bid": price, "value": e["fine_grams"] * price if price else None,
+                 "since": e.get("bought")} for e in self.state.get("physical_gold", [])]
+
+    # ------------------------------------------------------------ QR-Login
+
+    async def qr_start(self) -> dict:
+        """Neue QR-Challenge (ohne PIN). Die Oberfläche fragt danach qr_status() jede Sekunde ab."""
+        await self.qr_cancel()
+        client = TradeRepublic(self._tr_session, device_id=self.state.get("device_id"))
+        await client.qr_start()
+        self._qr = {"client": client, "status": "pending", "payload": None, "error": None, "task": None}
+        return await self.qr_status()
+
+    async def qr_status(self) -> dict:
+        qr = getattr(self, "_qr", None)
+        if not qr:
+            return {"status": "none"}
+        if qr["status"] == "pending":
+            try:
+                body = await qr["client"].qr_poll()
+            except TRError as err:
+                qr.update(status="error", error=str(err))
+            else:
+                if body.get("status") == "EXPIRED":
+                    qr["status"] = "expired"
+                elif body.get("status") == "CLAIMED":
+                    qr["status"] = "claimed"
+                    qr["task"] = asyncio.create_task(self._qr_finish(qr))
+                elif body.get("qrCodePayload"):
+                    qr["payload"] = body["qrCodePayload"]
+        out = {"status": qr["status"], "error": qr["error"]}
+        if qr["status"] == "pending" and qr["payload"]:
+            out["payload"] = qr["payload"]
+        return out
+
+    async def _qr_finish(self, qr: dict) -> None:
+        """Gescannt: auf die Bestätigung in der TR-App warten und die Session übernehmen."""
+        client = qr["client"]
+        try:
+            await client.qr_complete(wait=120)
+        except TRError as err:
+            qr.update(status="error", error=str(err))
+            return
+        async with self._lock:
+            self.tr.cookies = dict(client.cookies)
+            self.tr.sec_acc_no = client.sec_acc_no
+            self.state["login_at"] = datetime.now(timezone.utc).isoformat()
+            self.state["login_method"] = "qr"
+            self.state["sent"].pop("auth", None)
+            await self.async_save()
+        qr["status"] = "done"
+        await self.refresh()
+        if self.on_login:
+            await self.on_login()
+
+    async def qr_cancel(self) -> None:
+        qr = getattr(self, "_qr", None)
+        if qr and qr.get("task") and not qr["task"].done():
+            qr["task"].cancel()
+        self._qr = None
 
     async def logout(self) -> None:
         async with self._lock:
@@ -410,9 +530,13 @@ class Engine:
             pillars[key] = {"cfg": cfg, "res": res, "st": st}
 
         # 2) Papierdepot ausführen (nur ohne echtes Depot)
+        phys = self._physical_holdings()
+        phys_value = sum(h["value"] or 0 for h in phys)
+        gold_key = next((k for k, p in pillars.items() if p["cfg"]["isin"] == GOLD_ISIN), None)
         if mode == "paper" and is_open:
             for key, p in pillars.items():
-                self._paper_execute(key, p["st"], amounts[key], now)
+                amount = amounts[key] - phys_value if key == gold_key else amounts[key]
+                self._paper_execute(key, p["st"], amount, now)
 
         # 3) Bestände je Säule
         unassigned: list[dict] = []
@@ -420,6 +544,8 @@ class Engine:
             holdings, unassigned = self._allocate(pillars, depot)
         else:
             holdings = self._paper_holdings(pillars)
+        if gold_key and phys:
+            holdings.setdefault(gold_key, []).extend(phys)
 
         # 4) Werte, Aktion, Status
         values: dict[str, float] = {}
@@ -433,8 +559,14 @@ class Engine:
                 value = st.get("proceeds") or amounts[key]
             values[key] = value
             target = st.get("target") if st.get("month") else None
-            action = S.plan_action([h.get("counts_as") or h["isin"] for h in held], target) \
+            tradable = [h for h in held if not h.get("physical")]
+            physical_value = sum(h.get("value") or 0 for h in held if h.get("physical"))
+            # Kaufbetrag: was das physische Gold nicht schon abdeckt
+            buy_budget = max((st.get("proceeds") or amounts[key]) - physical_value, 0.0)
+            action = S.plan_action([h.get("counts_as") or h["isin"] for h in tradable], target) \
                 if st.get("month") else None
+            if action == "buy" and buy_budget < 2 * ORDER_FEE:
+                action = "hold"  # die Säule ist mit physischem Gold schon gedeckt
             if mode == "depot" and not depot.get("connected"):
                 action = None  # ohne Depotdaten keine Handlungsanweisung
             quote = self._price(cfg["isin"])
@@ -470,6 +602,8 @@ class Engine:
                 "close_month": res.get("close_month"),
                 "close": res.get("close"),
                 "held": held,
+                "physical_value": physical_value or None,
+                "buy_budget": buy_budget,
                 "value": value,
                 "amount": amounts[key],
                 "proceeds": st.get("proceeds"),
@@ -517,6 +651,7 @@ class Engine:
             "updated": now.isoformat(),
             "mode": mode,
             "stats": stats,
+            "physical_gold": self.physical_gold(),
             "todo": todo,
             "market_open": is_open,
             "next_check": S.next_check_date(today).isoformat(),
@@ -684,6 +819,8 @@ class Engine:
             if not ask:
                 return
             budget = st.get("proceeds") if st.get("proceeds") else amount
+            if budget < 2 * ORDER_FEE:
+                return  # nichts zu kaufen (z. B. Gold-Säule durch physisches Gold gedeckt)
             qty = (budget - ORDER_FEE) / ask
             st["paper"] = {"isin": target, "qty": qty, "entry": ask, "invested": budget, "since": now.isoformat()}
             st.setdefault("trades", []).append({"time": now.isoformat(), "side": "buy", "isin": target,
@@ -699,18 +836,24 @@ class Engine:
             if p["prev_target"] != p["target"]:
                 return f"Papierdepot: {p['prev_target_name']} → {p['target_name'] or 'Cash'}"
             return f"Papierdepot hält {p['target_name'] or 'Cash'}"
-        held = p["held"]
+        held = [h for h in p["held"] if not h.get("physical")]
         held_txt = ", ".join(f"{h['name']} ({h['isin']})" for h in held) or "–"
         held_val = sum(h.get("value") or 0 for h in held)
         tgt = f"{p['target_name']} ({p['target']})" if p["target"] else "Cash"
+        phys = (f" – physisches Gold (≈ {S.fmt_eur(p['physical_value'], 0)}) bleibt liegen"
+                if p.get("physical_value") else "")
         if action == "buy":
-            budget = p.get("proceeds") or p["amount"]
-            return f"KAUFEN: {tgt} für ca. {S.fmt_eur(budget, 0)}"
+            budget = p.get("buy_budget")
+            budget = budget if budget is not None else (p.get("proceeds") or p["amount"])
+            covered = (f" (physisches Gold ≈ {S.fmt_eur(p['physical_value'], 0)} schon abgezogen)"
+                       if p.get("physical_value") else "")
+            return f"KAUFEN: {tgt} für ca. {S.fmt_eur(budget, 0)}{covered}"
         if action == "sell":
-            return f"KOMPLETT VERKAUFEN: {held_txt} (≈ {S.fmt_eur(held_val, 0)}), auch mit Verlust – Geld bleibt in Cash"
+            return (f"KOMPLETT VERKAUFEN: {held_txt} (≈ {S.fmt_eur(held_val, 0)}), auch mit Verlust – "
+                    f"Geld bleibt in Cash{phys}")
         if action == "switch":
             return (f"WECHSELN: {held_txt} komplett verkaufen (≈ {S.fmt_eur(held_val, 0)}), "
-                    f"danach den Erlös in {tgt} anlegen")
+                    f"danach den Erlös in {tgt} anlegen{phys}")
         if action == "hold":
             return f"halten ({p['target_name']})"
         return "nichts tun – bleibt in Cash"

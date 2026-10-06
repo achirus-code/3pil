@@ -109,3 +109,33 @@ async def test_app_confirmation_switches_to_code_when_asked(monkeypatch):
     with pytest.raises(TRCodeRequired):
         await tr.login_complete()
     assert tr.required_action == "AUTHENTICATOR_VERIFICATION"
+
+
+async def test_qr_challenge_flow(monkeypatch):
+    import asyncio
+    tr, calls, no_sleep = login_client({
+        ("POST", "/qr-challenges"): [(200, {"challengeId": "c1", "challengeExpiresAt": "x"}, {"JSESSIONID": "j"})],
+        ("GET", "/qr-challenges/c1"): [
+            (200, {"status": "PENDING", "qrCodePayload": "https://traderepublic.com/web-login/challenge?t=1"}, {}),
+            (200, {"status": "CLAIMED", "processId": "p9"}, {})],
+        ("GET", "/processes/p9"): [(200, {"status": "COMPLETED"}, {"tr_session": "s", "tr_refresh": "r"})],
+        ("GET", "/api/v2/auth/account"): [(200, {"securitiesAccountNumber": "7"}, {})],
+    })
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    await tr.qr_start()
+    assert tr.cookies["JSESSIONID"] == "j"
+    assert (await tr.qr_poll())["status"] == "PENDING"
+    assert (await tr.qr_poll())["status"] == "CLAIMED"
+    await tr.qr_complete()
+    assert tr.cookies["tr_session"] == "s" and tr.sec_acc_no == "7"
+
+
+async def test_qr_expired_and_throttled():
+    tr, _, _ = login_client({
+        ("GET", "/qr-challenges/c1"): [
+            (429, {"errors": [{"errorCode": "TOO_MANY_REQUESTS"}]}, {}),
+            (410, {"errors": [{"errorCode": "PROCESS_GONE"}]}, {})],
+    })
+    tr._qr_challenge = "c1"
+    assert (await tr.qr_poll())["status"] == "PENDING"
+    assert (await tr.qr_poll())["status"] == "EXPIRED"

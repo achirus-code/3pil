@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import aiohttp
+import segno
 from aiohttp import web
 
 from .engine import Engine
@@ -43,6 +44,12 @@ def make_app(engine: Engine, on_change: Callable[[], Awaitable[None]] | None = N
     app.router.add_post("/api/login/start", login_start)
     app.router.add_post("/api/login/complete", login_complete)
     app.router.add_post("/api/logout", logout)
+    app.router.add_get("/api/gold", gold_list)
+    app.router.add_post("/api/gold", gold_add)
+    app.router.add_delete("/api/gold/{id}", gold_remove)
+    app.router.add_post("/api/login/qr", qr_start)
+    app.router.add_get("/api/login/qr", qr_status)
+    app.router.add_delete("/api/login/qr", qr_cancel)
     app.router.add_get("/api/health", health)
     return app
 
@@ -145,3 +152,69 @@ async def logout(request: web.Request) -> web.Response:
     await request.app[ENGINE].logout()
     await request.app[ON_CHANGE]()
     return web.json_response({"ok": True})
+
+
+def _qr_response(status: dict) -> web.Response:
+    out = dict(status)
+    payload = out.pop("payload", None)
+    if payload:
+        # als SVG vom Server: die Seite braucht keine fremde QR-Bibliothek
+        out["svg"] = segno.make(payload, error="m").svg_inline(scale=6, border=2, dark="#000", light="#fff")
+    return _no_cache(web.json_response(out))
+
+
+async def qr_start(request: web.Request) -> web.Response:
+    engine = request.app[ENGINE]
+    if not engine.on_login:
+        engine.on_login = request.app[ON_CHANGE]
+    try:
+        return _qr_response(await engine.qr_start())
+    except TRError as err:
+        return _error(str(err))
+    except aiohttp.ClientError as err:
+        return _error(f"Trade Republic nicht erreichbar: {err}", 502)
+
+
+async def qr_status(request: web.Request) -> web.Response:
+    try:
+        return _qr_response(await request.app[ENGINE].qr_status())
+    except aiohttp.ClientError as err:
+        return _error(f"Trade Republic nicht erreichbar: {err}", 502)
+
+
+async def qr_cancel(request: web.Request) -> web.Response:
+    await request.app[ENGINE].qr_cancel()
+    return web.json_response({"ok": True})
+
+
+# ------------------------------------------------------------------ physisches Gold
+
+async def gold_list(request: web.Request) -> web.Response:
+    return _no_cache(web.json_response(request.app[ENGINE].physical_gold()))
+
+
+def _num(body: dict, key: str, default: float | None = None) -> float:
+    raw = body.get(key, default)
+    try:
+        return float(str(raw).replace(".", "").replace(",", ".")) if isinstance(raw, str) and "," in raw \
+            else float(raw)
+    except (TypeError, ValueError):
+        raise web.HTTPBadRequest(text=f"{key}: Zahl erwartet")
+
+
+async def gold_add(request: web.Request) -> web.Response:
+    body = await _json(request)
+    try:
+        entry = await request.app[ENGINE].add_physical_gold(
+            name=str(body.get("name") or ""), qty=_num(body, "qty"), unit=str(body.get("unit") or "g"),
+            fineness=_num(body, "fineness", 999.9), cost=_num(body, "cost", 0), bought=body.get("bought") or None)
+    except ValueError as err:
+        return _error(str(err))
+    await request.app[ON_CHANGE]()
+    return web.json_response(entry)
+
+
+async def gold_remove(request: web.Request) -> web.Response:
+    ok = await request.app[ENGINE].remove_physical_gold(request.match_info["id"])
+    await request.app[ON_CHANGE]()
+    return web.json_response({"ok": ok}, status=200 if ok else 404)

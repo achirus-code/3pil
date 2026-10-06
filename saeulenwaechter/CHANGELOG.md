@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.0
+
+- **Login per QR-Code:** in der Oberfläche den QR-Code mit der Handy-Kamera oder der Trade-Republic-App scannen und
+  in der App bestätigen – ohne PIN und ohne Authenticator-Code. Der Code erneuert sich automatisch.
+- **Physisches Gold:** Barren und Münzen mit Menge (g oder oz), Feingehalt und Kaufpreis eintragen. Das Gold zählt
+  zur Gold-Säule (Wert, Statistik, Verlauf, Bestandsbalken), wird mit dem Goldpreis je Gramm (Xetra-Gold)
+  bewertet; Kaufanweisungen ziehen es ab, bei einem Verkaufssignal bleibt es liegen. Neue Entität
+  `sensor.saeulenwaechter_physisches_gold`.
+- Die App meldet Trade Republic jetzt die aktuelle Version der Web-App (automatisch ermittelt) und die richtige
+  Zeitzone (Sommerzeit).
+
 ## 2.0.2
 
 - Trade-Republic-Login mit Authenticator-Code: ein abgelehnter Code (`AUTHENTICATION_ERROR`) zeigt jetzt

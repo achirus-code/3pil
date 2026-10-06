@@ -70,7 +70,8 @@ def build_states(d: dict) -> dict[str, dict[str, Any]]:
             "ziel_isin": p.get("target"), "ziel_name": p.get("target_name")})
         put(f"sensor.{P}_{k}_wert", _round(p.get("value")), {
             **_money(f"{n} Wert", "mdi:cash"), "state_class": "total",
-            "betrag": p.get("amount"), "gemerkter_erloes": p.get("proceeds"), "angeglichen": _round(p.get("target_value"))})
+            "betrag": p.get("amount"), "gemerkter_erloes": p.get("proceeds"), "angeglichen": _round(p.get("target_value")),
+            "physisches_gold": _round(p.get("physical_value"))})
         put(f"sensor.{P}_{k}_ist_anteil", _pct(p.get("ist")), {
             "friendly_name": f"{n} Ist-Anteil", "icon": "mdi:chart-pie", "unit_of_measurement": "%",
             "state_class": "measurement", "soll": _pct(p.get("soll")), "abweichung_pp": _round(p.get("diff_pp"))})
@@ -94,6 +95,13 @@ def build_states(d: dict) -> dict[str, dict[str, Any]]:
         "cash": d["depot"].get("cash"),
         "saeulen": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()} for r in ov["rows"]],
         "statistik": st})
+    pg = d.get("physical_gold") or {}
+    put(f"sensor.{P}_physisches_gold", _round(pg.get("value")), {
+        **_money(f"{NAME} Physisches Gold", "mdi:gold"), "state_class": "total",
+        "feingold_g": _round(pg.get("fine_grams"), 3), "einstand": pg.get("cost"),
+        "goldpreis_eur_g": _round(pg.get("price_g"), 3),
+        "bestand": [{k: e.get(k) for k in ("name", "qty", "unit", "fineness", "fine_grams", "cost", "bought", "value")}
+                    for e in pg.get("items", [])]})
     put(f"sensor.{P}_gewinn_verlust", _round(total.get("pnl")), {
         **_money(f"{NAME} Gewinn/Verlust", "mdi:finance"), "prozent": _pct(total.get("pnl_pct")),
         "einstand": total.get("cost")})
