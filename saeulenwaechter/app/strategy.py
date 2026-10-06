@@ -7,6 +7,8 @@ c[k] der Schluss vor k Monaten.
 
 from __future__ import annotations
 
+import calendar
+
 import re
 from datetime import date, datetime, timezone
 from typing import Any
@@ -200,6 +202,14 @@ def eval_unemployment(series: list[tuple[str, float]] | None) -> dict:
     return row
 
 
+def _last_saturday(month: str) -> str:
+    """„2026-10“ → „2026-10-31“: der letzte Samstag des Monats (die Wochen der Erstanträge enden samstags)."""
+    year, mon = map(int, month.split("-"))
+    last = calendar.monthrange(year, mon)[1]
+    day = max(d for d in range(last - 6, last + 1) if calendar.weekday(year, mon, d) == 5)
+    return f"{month}-{day:02d}"
+
+
 def eval_claims(weeks: list[tuple[str, float]] | None, today: date) -> dict:
     """weeks: (YYYY-MM-DD Wochenende, Erstanträge NSA). Ø des letzten vollständigen Monats vs. Vorjahresmonat."""
     row = {"key": "claims", "title": "US-Erstanträge", "state": "unknown", "value": "keine Daten"}
@@ -208,8 +218,11 @@ def eval_claims(weeks: list[tuple[str, float]] | None, today: date) -> dict:
     by_month: dict[str, list[float]] = {}
     for d, v in weeks:
         by_month.setdefault(d[:7], []).append(v)
+    reported = {d for d, _ in weeks}
     current = month_key(today)
-    complete = sorted(m for m in by_month if m < current)
+    # Vollständig ist ein Monat erst, wenn die Woche bis zu seinem letzten Samstag gemeldet ist (das DOL meldet
+    # donnerstags mit rund fünf Tagen Verzug – Anfang des Folgemonats fehlt sie oft noch)
+    complete = sorted(m for m in by_month if m < current and _last_saturday(m) in reported)
     for m in reversed(complete):
         prev = add_months(m, -12)
         if prev in by_month:

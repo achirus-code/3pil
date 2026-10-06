@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.1
+
+- US-Erstanträge: Ein Monat gilt erst als vollständig, wenn die Woche bis zu seinem letzten Samstag gemeldet ist. Bisher wurde Anfang des Monats – genau zur Monatsentscheidung – oft der Vormonat ohne seine letzte Woche ausgewertet.
+
 ## 2.3.0
 
 - Trade Republic bleibt nie verbunden: Nach dem Login liest die App einmal Positionen, Cash und Zinssatz, speichert den Stand und meldet sich sofort wieder ab. Die Kurse laufen weiter. Button **Neu synchronisieren** für einen neuen Abgleich (erneut anmelden).
