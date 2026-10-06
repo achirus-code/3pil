@@ -5,7 +5,7 @@ Euro-Anleihen 30 %, Backtest-Variante „C7“, siehe [docs/3-saeulen-strategie.
 
 Der Säulenwächter rechnet die komplette Monatslogik selbst nach – Trendsignale, Rezessionszeichen,
 Dollar-Signal, Ausweich-Anleihen, Umschaltkurse, Säulen-Drift – zeigt alles in einer eigenen Oberfläche in der
-Seitenleiste und als Entitäten in Home Assistant an und meldet **jede neue Erkenntnis per WhatsApp** (CallMeBot)
+Seitenleiste und als Entitäten in Home Assistant an und meldet **jede neue Erkenntnis per WhatsApp** (über „WhatsApp for Home Assistant“)
 mit einer konkreten Anweisung. Er **handelt nie selbst**.
 
 ## Installation
@@ -13,7 +13,7 @@ mit einer konkreten Anweisung. Er **handelt nie selbst**.
 1. *Einstellungen › Apps › App-Store › ⋮ › Repositories* → `https://github.com/achirus-code/3pil` hinzufügen.
 2. **Säulenwächter** installieren. Der Supervisor baut das Image dabei auf deinem Gerät (amd64 oder aarch64,
    dauert beim ersten Mal ein paar Minuten).
-3. Im Reiter **Konfiguration** Gesamtbetrag, WhatsApp-Nummer (z. B. `4917…`) und CallMeBot-API-Key eintragen,
+3. Im Reiter **Konfiguration** Gesamtbetrag, Benachrichtigungsdienst (`whatsapp.send_message`) und Empfänger (z. B. `+49171…`) eintragen,
    dann **Starten**. „In Seitenleiste anzeigen“ einschalten.
 4. In der Oberfläche (Seitenleiste „Säulenwächter“) unten **Bei Trade Republic anmelden**: den **QR-Code** mit der
    Handy-Kamera oder der TR-App scannen und in der App bestätigen – oder Telefonnummer und PIN, danach in der App

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.8.0
+
+- CallMeBot entfernt. Meldungen gehen nur noch über einen Dienst in Home Assistant, Standard: whatsapp.send_message von „WhatsApp for Home Assistant“ (FaserF).
+- Empfänger wird normalisiert (0171… → +49171…, Gruppen-IDs …@g.us bleiben), höchstens eine Nachricht pro Sekunde, 10 s Timeout.
+- Die alte WhatsApp-Nummer dient als Empfänger, solange „Empfänger“ leer ist.
+
 ## 2.7.0
 
 - Statistik: Entwicklung der heutigen Bestände über 1 Monat, 6 Monate und 1 Jahr (Gewinn in € und %) mit umschaltbarer Grafik aus Tagesschlusskursen. Junge Produkte ohne lange Kurshistorie werden mit dem gleichwertigen Säulen-Instrument fortgeschrieben.

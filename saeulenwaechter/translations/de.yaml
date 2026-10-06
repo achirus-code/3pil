@@ -2,12 +2,6 @@ configuration:
   total:
     name: Gesamtbetrag (€)
     description: Nur für das Papierdepot (Startkapital). Im echten Depot rechnet die App immer mit 40/30/30 vom tatsächlichen Depotwert.
-  wa_phone:
-    name: WhatsApp-Nummer
-    description: Internationales Format ohne +, z. B. 4917…
-  wa_apikey:
-    name: CallMeBot API-Key
-    description: Schlüssel von CallMeBot für WhatsApp-Meldungen.
   notify:
     name: WhatsApp-Meldungen senden
   monthly_report:
@@ -38,8 +32,8 @@ configuration:
     name: Cash-Reserve außerhalb der Strategie (€)
     description: Dieser Teil des Guthabens bei Trade Republic zählt nicht zur Strategie (z. B. Notgroschen). 0 = alles Cash gehört zur Strategie.
   ha_service:
-    name: Benachrichtigungsdienst in Home Assistant (optional)
-    description: "Zusätzlich oder statt CallMeBot, z. B. whatsapp.send_message (WhatsApp for Home Assistant), notify.mobile_app_<handy> (Home-Assistant-App) oder telegram_bot.send_message."
+    name: Benachrichtigungsdienst in Home Assistant
+    description: "z. B. whatsapp.send_message (WhatsApp for Home Assistant, Standard), notify.mobile_app_<handy> (Home-Assistant-App) oder telegram_bot.send_message."
   ha_target:
-    name: Empfänger für den Dienst (optional)
-    description: "Bei whatsapp.send_message die Nummer ohne + (z. B. 49171…) oder eine Gruppen-ID; bei notify meist leer lassen."
+    name: Empfänger
+    description: "Bei WhatsApp die Nummer (z. B. +49171… oder 0171…) oder eine Gruppen-ID (…@g.us); bei notify.mobile_app leer lassen."

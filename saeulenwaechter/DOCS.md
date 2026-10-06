@@ -2,8 +2,8 @@
 
 ## Einrichten
 
-1. **Konfiguration:** Gesamtbetrag (Summe der drei Säulen, im Papiermodus das Startkapital), WhatsApp-Nummer
-   im internationalen Format ohne `+` (z. B. `4917…`) und CallMeBot-API-Key eintragen und speichern.
+1. **Konfiguration:** Gesamtbetrag (Summe der drei Säulen, im Papiermodus das Startkapital), Benachrichtigungsdienst
+   (Standard `whatsapp.send_message`) und Empfänger (z. B. `+49171…`) eintragen und speichern – siehe unten.
 2. **Starten** und „In Seitenleiste anzeigen“ einschalten.
 3. In der Oberfläche unten **Bei Trade Republic anmelden**: den QR-Code mit der Handy-Kamera oder der
    Trade-Republic-App scannen und in der App bestätigen. Alternativ Telefonnummer und 4-stellige PIN, danach
@@ -26,7 +26,7 @@ ab, heißt es „halten“. Bei einem Verkaufssignal betrifft die Anweisung nur 
 | Option | Bedeutung |
 |---|---|
 | Gesamtbetrag | Summe der drei Säulen (40/30/30). Eine Änderung setzt die Beträge neu. |
-| WhatsApp-Nummer, CallMeBot API-Key | Ziel der Meldungen. |
+| Benachrichtigungsdienst, Empfänger | Ziel der Meldungen (siehe unten). |
 | WhatsApp-Meldungen senden | Aus: nur Anzeige in der Oberfläche. |
 | Monatsbericht auch ohne Änderung | Jeden Monat eine Zusammenfassung. |
 | Vorwarnung | Meldung, wenn ein Signal zum Monatsende kippen würde (letzte 7 Tage). |
@@ -53,13 +53,13 @@ Minute erneuert.
 - Die Trade-Republic-API ist inoffiziell und kann sich ändern. Der Säulenwächter liest nur und handelt nie selbst.
 - Keine Anlageberatung.
 
-## WhatsApp über Home Assistant (optional)
+## Meldungen (WhatsApp über Home Assistant)
 
-Statt oder zusätzlich zu CallMeBot kann der Säulenwächter jeden Dienst in Home Assistant aufrufen:
+Der Säulenwächter ruft einen Dienst in Home Assistant auf – direkt über den Supervisor, ohne HA-URL und Token:
 
 - **WhatsApp for Home Assistant** (https://faserf.github.io/ha-whatsapp/): App und Integration installieren,
-  mit dem Handy koppeln, dann in den Optionen `ha_service: whatsapp.send_message` und als Empfänger
-  `ha_target` die eigene Nummer ohne `+` (z. B. `49171…`) eintragen. Achtung: inoffiziell – WhatsApp kann die
+  mit dem Handy koppeln, dann in den Optionen `ha_service: whatsapp.send_message` (Standard) und als Empfänger
+  `ha_target` die eigene Nummer (`+49171…` oder `0171…`) oder eine Gruppen-ID (`…@g.us`) eintragen. Achtung: inoffiziell – WhatsApp kann die
   gekoppelte Nummer sperren; am besten eine Zweitnummer verwenden.
 - **Home-Assistant-App:** `ha_service: notify.mobile_app_<handy>`, Empfänger leer lassen.
 - **Telegram:** `ha_service: telegram_bot.send_message`, Empfänger = Chat-ID.
