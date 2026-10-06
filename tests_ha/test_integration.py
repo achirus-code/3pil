@@ -202,6 +202,15 @@ async def test_depot_login_actions_and_reauth(hass, mocked, sent, freezer, monke
         assert rows["welt"]["soll"] == pytest.approx(0.4) and rows["anleihen"]["soll"] == 0.0
         assert split["cash"]["soll"] == pytest.approx(0.3)
         assert split["unassigned_value"] == pytest.approx(1000.0)
+        stats = {r["key"]: r for r in coord.data["stats"]["rows"]}
+        assert stats["welt"]["cost"] == pytest.approx(9000 * 4.3)
+        assert stats["welt"]["pnl"] == pytest.approx(9000 * (4.46 - 4.3))
+        assert stats["gold"]["pnl"] == pytest.approx(80 * (366.0 - 350.0))
+        assert stats["anleihen"]["pnl"] is None
+        assert "statistik" in hass.states.get("sensor.saeulenwaechter_depotwert").attributes
+        import os
+        if os.environ.get("SW_DUMP_DEPOT"):
+            Path(os.environ["SW_DUMP_DEPOT"]).write_text(json.dumps(coord.data, default=str))
 
         # Eigene Zusatz-ISIN in den Optionen: die Aktie zählt dann zur Welt-Säule
         result = await hass.config_entries.options.async_init(entry.entry_id)

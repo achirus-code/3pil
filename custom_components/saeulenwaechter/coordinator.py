@@ -439,9 +439,12 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
             out_pillars[row["key"]].update(ist=row["ist"], soll=row["soll"], diff_pp=row["diff_pp"],
                                            target_value=row["target_value"])
 
+        stats = S.pillar_stats([{"key": k, "name": p["name"], "value": p["value"], "held": p["held"]}
+                                for k, p in out_pillars.items()])
         return {
             "updated": now.isoformat(),
             "mode": mode,
+            "stats": stats,
             "market_open": is_open,
             "next_check": S.next_check_date(today).isoformat(),
             "pillars": out_pillars,

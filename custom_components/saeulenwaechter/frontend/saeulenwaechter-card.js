@@ -66,6 +66,14 @@ const STYLE = `
   .bar .fill { position:absolute; left:0; top:0; bottom:0; border-radius:3px; }
   .bar .mark { position:absolute; top:-2px; bottom:-2px; width:1.5px; background:var(--primary-text-color); }
   .bar.tr { height:4px; margin:3px 0 2px; }
+  table.stats { width:100%; border-collapse:collapse; font-size:12px; margin:2px 0 10px; }
+  table.stats th { text-align:right; font-weight:500; color:var(--secondary-text-color); padding:2px 4px; }
+  table.stats th:first-child, table.stats td:first-child { text-align:left; padding-left:0; }
+  table.stats td { text-align:right; padding:3px 4px; border-top:1px solid var(--divider-color); }
+  .stat-top { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; margin:2px 0 8px; }
+  .stat-top .k { font-size:11px; color:var(--secondary-text-color); }
+  .stat-top .big { font-size:24px; font-weight:700; }
+  .stat-top .mid { font-size:15px; font-weight:600; }
   .trv { font-size:11px; color:var(--sw-tr); }
   .trv.warn { color:var(--sw-orange); }
   .pillar .val { font-size:12px; color:var(--secondary-text-color); }
@@ -237,6 +245,31 @@ class SaeulenBase extends HTMLElement {
     return cash + legend + list;
   }
 
+  stats(d) {
+    const st = d.stats;
+    if (!st) return "";
+    const color = (v) => v == null || Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
+    const signed = (v) => v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
+    const t = st.total;
+    const row = (r) => `<tr>
+        <td>${esc(r.name)}</td>
+        <td class="num">${eur(r.value, 0)}</td>
+        <td class="num">${r.cost != null ? eur(r.cost, 0) : (r.invested === false ? "Cash" : "–")}</td>
+        <td class="num" style="color:${color(r.pnl)}">${signed(r.pnl)}</td>
+        <td class="num" style="color:${color(r.pnl)}">${r.pnl_pct != null ? pct(r.pnl_pct) : ""}</td></tr>`;
+    return `<div class="section">
+      <div class="label">Säulenstatistik · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
+      <div class="stat-top num">
+        <div><div class="k">Gesamtwert</div><div class="big">${eur(t.value, 0)}</div></div>
+        <div><div class="k">Einstand</div><div class="mid">${t.cost != null ? eur(t.cost, 0) : "–"}</div></div>
+        <div><div class="k">Gewinn / Verlust</div><div class="mid" style="color:${color(t.pnl)}">${signed(t.pnl)}${t.pnl_pct != null ? ` · ${pct(t.pnl_pct)}` : ""}</div></div>
+      </div>
+      <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Gewinn / Verlust</th></tr>
+        ${st.rows.map(row).join("")}</table>
+      <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
+    </div>`;
+  }
+
   pillars(d, active) {
     const ov = d.overview;
     const rows = ov.rows.map((r) => {
@@ -307,7 +340,7 @@ class SaeulenwaechterCard extends SaeulenBase {
       const p = d.pillars[cfg.pillar];
       body = this.hero(p, d) + this.position(p) + this.signals(p) + this.pillars(d, p.key);
     } else {
-      body = `<div class="section"><div class="label">${esc(cfg.title || "Säulenwächter")} · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
+      body = this.stats(d) + `<div class="section"><div class="label">${esc(cfg.title || "Säulenwächter")} · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
         ${this.overviewRows(d, false)}</div>` + this.pillars(d, null);
     }
     this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card>${body}</ha-card>`;
@@ -341,6 +374,7 @@ class SaeulenwaechterPanel extends SaeulenBase {
         <div class="cols">
           <div>
             <ha-card>
+              ${this.stats(d)}
               <div class="section">
                 <div class="label">Übersicht</div>
                 <div class="grid num">

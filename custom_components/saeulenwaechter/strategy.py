@@ -572,3 +572,26 @@ def tr_split(pillar_values: dict[str, float], targets: dict[str, str | None], so
     return {"base": base, "rows": rows,
             "cash": {"value": cash, "ist": cash / base if base else 0.0, "soll": soll_cash},
             "unassigned_value": unassigned_value}
+
+
+
+def pillar_stats(pillars: list[dict]) -> dict:
+    """Statistik der Säulen: Wert, Einstand, Gewinn/Verlust je Säule und gesamt.
+
+    pillars: [{key, name, value, held: [{cost, value}]}]. Gewinn/Verlust nur für offene Positionen mit
+    bekanntem Einstand und Kurs; eine Säule in Cash zählt mit ihrem Wert, aber ohne Gewinn/Verlust.
+    """
+    rows = []
+    for p in pillars:
+        held = p.get("held") or []
+        known = held and all(h.get("cost") and h.get("value") is not None for h in held)
+        cost = sum(h["cost"] for h in held) if known else None
+        pos_value = sum(h["value"] for h in held) if known else None
+        pnl = pos_value - cost if known else None
+        rows.append({"key": p["key"], "name": p["name"], "value": p.get("value"), "cost": cost,
+                     "pnl": pnl, "pnl_pct": pnl / cost if known and cost else None, "invested": bool(held)})
+    with_pnl = [r for r in rows if r["pnl"] is not None]
+    cost = sum(r["cost"] for r in with_pnl)
+    pnl = sum(r["pnl"] for r in with_pnl)
+    return {"rows": rows, "total": {"value": sum(r["value"] or 0 for r in rows), "cost": cost if with_pnl else None,
+                                    "pnl": pnl if with_pnl else None, "pnl_pct": pnl / cost if cost else None}}

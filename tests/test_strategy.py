@@ -234,3 +234,17 @@ def test_tr_split_shows_each_product_of_a_pillar():
     row = split["rows"][0]
     assert row["ist"] == pytest.approx(0.4)
     assert [p["ist"] for p in row["parts"]] == [pytest.approx(0.2), pytest.approx(0.2)]
+
+
+def test_pillar_stats_value_cost_and_profit():
+    st = S.pillar_stats([
+        {"key": "welt", "name": "Welt", "value": 44_000.0,
+         "held": [{"cost": 30_000.0, "value": 33_000.0}, {"cost": 10_000.0, "value": 11_000.0}]},
+        {"key": "gold", "name": "Gold", "value": 27_000.0, "held": [{"cost": 30_000.0, "value": 27_000.0}]},
+        {"key": "anleihen", "name": "Anleihen", "value": 30_000.0, "held": []},
+    ])
+    rows = {r["key"]: r for r in st["rows"]}
+    assert rows["welt"]["pnl"] == 4_000.0 and rows["welt"]["pnl_pct"] == pytest.approx(0.1)
+    assert rows["gold"]["pnl"] == -3_000.0
+    assert rows["anleihen"]["pnl"] is None and rows["anleihen"]["invested"] is False
+    assert st["total"] == {"value": 101_000.0, "cost": 70_000.0, "pnl": 1_000.0, "pnl_pct": pytest.approx(1 / 70)}

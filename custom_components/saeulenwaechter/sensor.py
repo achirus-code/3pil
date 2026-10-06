@@ -118,7 +118,8 @@ GLOBAL_SENSORS: list[SaeulenSensorDescription] = [
         value_fn=lambda p, d: _round(d["overview"]["total"]),
         attrs_fn=lambda p, d: {"modus": d.get("mode"), "cash": d["depot"].get("cash"),
                                "saeulen": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()}
-                                           for r in d["overview"]["rows"]]},
+                                           for r in d["overview"]["rows"]],
+                               "statistik": d.get("stats")},
     ),
     SaeulenSensorDescription(
         key="drift", name="Abweichung", icon="mdi:scale-unbalanced",
