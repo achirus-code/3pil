@@ -595,3 +595,17 @@ def pillar_stats(pillars: list[dict]) -> dict:
     pnl = sum(r["pnl"] for r in with_pnl)
     return {"rows": rows, "total": {"value": sum(r["value"] or 0 for r in rows), "cost": cost if with_pnl else None,
                                     "pnl": pnl if with_pnl else None, "pnl_pct": pnl / cost if cost else None}}
+
+
+
+def record_history(history: list[dict], day: str, stats: dict, mode: str, max_days: int = 730) -> list[dict]:
+    """Tagesverlauf der Säulen: ein Eintrag je Tag (der letzte Stand des Tages gewinnt), höchstens max_days."""
+    t = stats["total"]
+    entry = {"date": day, "mode": mode, "value": round(t["value"], 2),
+             "cost": round(t["cost"], 2) if t.get("cost") is not None else None,
+             "pnl": round(t["pnl"], 2) if t.get("pnl") is not None else None,
+             "pillars": {r["key"]: round(r["value"] or 0, 2) for r in stats["rows"]}}
+    out = [h for h in history if h["date"] != day]
+    out.append(entry)
+    out.sort(key=lambda h: h["date"])
+    return out[-max_days:]

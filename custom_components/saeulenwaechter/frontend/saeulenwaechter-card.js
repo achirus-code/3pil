@@ -70,6 +70,22 @@ const STYLE = `
   table.stats th { text-align:right; font-weight:500; color:var(--secondary-text-color); padding:2px 4px; }
   table.stats th:first-child, table.stats td:first-child { text-align:left; padding-left:0; }
   table.stats td { text-align:right; padding:3px 4px; border-top:1px solid var(--divider-color); }
+  .alarm { margin:12px; padding:14px 16px; border-radius:12px; color:#fff;
+           background:linear-gradient(135deg, #d70015, #ff3b30); border:3px solid #ff3b30;
+           box-shadow:0 0 0 0 rgba(255,59,48,.7); animation:sw-pulse 1.6s infinite; }
+  .alarm-head { display:flex; align-items:center; gap:8px; font-size:16px; font-weight:800; letter-spacing:.2px;
+                text-transform:uppercase; }
+  .alarm-head ha-icon { --mdc-icon-size:28px; }
+  .alarm-row { margin-top:10px; padding:10px 12px; border-radius:8px; background:rgba(0,0,0,.22); }
+  .alarm-tag { display:inline-block; font-size:11px; font-weight:800; text-transform:uppercase; background:#fff;
+               color:#d70015; padding:2px 8px; border-radius:10px; }
+  .alarm-text { margin-top:6px; font-size:15px; font-weight:700; line-height:1.35; }
+  .alarm-foot { margin-top:10px; font-size:12px; opacity:.9; }
+  @keyframes sw-pulse { 0% { box-shadow:0 0 0 0 rgba(255,59,48,.7); } 70% { box-shadow:0 0 0 14px rgba(255,59,48,0); }
+                        100% { box-shadow:0 0 0 0 rgba(255,59,48,0); } }
+  @media (prefers-reduced-motion: reduce) { .alarm { animation:none; } }
+  svg.hist { width:100%; height:110px; display:block; margin-top:4px; }
+  .hist-legend { display:flex; justify-content:space-between; font-size:11px; color:var(--secondary-text-color); margin-top:2px; }
   .stat-top { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; margin:2px 0 8px; }
   .stat-top .k { font-size:11px; color:var(--secondary-text-color); }
   .stat-top .big { font-size:24px; font-weight:700; }
@@ -245,6 +261,18 @@ class SaeulenBase extends HTMLElement {
     return cash + legend + list;
   }
 
+  alert(d, only) {
+    const todo = (d.todo || []).filter((t) => !only || t.key === only || t.key === "rebalance");
+    if (!todo.length) return "";
+    return `<div class="alarm" role="alert">
+      <div class="alarm-head"><ha-icon icon="mdi:alert-octagon"></ha-icon>
+        <span>${todo.length === 1 ? "Handlung nötig" : `${todo.length} Handlungen nötig`} – Depot weicht von der Strategie ab</span></div>
+      ${todo.map((t) => `<div class="alarm-row"><span class="alarm-tag">${esc(t.name)} · ${esc(t.action_label)}</span>
+        <div class="alarm-text">${esc(t.text)}</div></div>`).join("")}
+      <div class="alarm-foot">Bitte bei Trade Republic umsetzen – die Meldung verschwindet, sobald das Depot zum Ziel passt.</div>
+    </div>`;
+  }
+
   stats(d) {
     const st = d.stats;
     if (!st) return "";
@@ -267,7 +295,37 @@ class SaeulenBase extends HTMLElement {
       <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Gewinn / Verlust</th></tr>
         ${st.rows.map(row).join("")}</table>
       <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
+      ${this.history(d)}
     </div>`;
+  }
+
+  history(d) {
+    const h = (d.value_history || []).filter((x) => x.value != null);
+    if (h.length < 2) {
+      return `<div class="label" style="margin-top:12px">Verlauf</div>
+        <div class="note">Der Verlauf wird ab heute einmal täglich aufgezeichnet${h.length ? " – erster Punkt " + new Date(h[0].date).toLocaleDateString("de-DE") : ""}.</div>`;
+    }
+    const W = 400, H = 110, P = 4;
+    const vals = h.map((x) => x.value);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (hi - lo < 1) { lo -= 1; hi += 1; }
+    const x = (i) => P + (i / (h.length - 1)) * (W - 2 * P);
+    const y = (v) => P + (1 - (v - lo) / (hi - lo)) * (H - 2 * P);
+    const line = h.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join("");
+    const area = `${line}L${x(h.length - 1).toFixed(1)},${H - P}L${x(0).toFixed(1)},${H - P}Z`;
+    const first = h[0], last = h[h.length - 1];
+    const change = last.value - first.value;
+    const col = change >= 0 ? "var(--sw-green)" : "var(--sw-red)";
+    const dates = (p) => new Date(p.date).toLocaleDateString("de-DE");
+    return `<div class="label" style="margin-top:12px">Verlauf · ${dates(first)} – ${dates(last)}</div>
+      <svg class="hist" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+           aria-label="Verlauf des Gesamtwerts von ${eur(first.value, 0)} auf ${eur(last.value, 0)}">
+        <path d="${area}" fill="${col}" opacity=".12"/>
+        <path d="${line}" fill="none" stroke="${col}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+        ${h.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="5" fill="transparent"><title>${dates(p)}: ${eur(p.value, 0)}${p.pnl != null ? " · G/V " + eur(p.pnl, 0) : ""}</title></circle>`).join("")}
+      </svg>
+      <div class="hist-legend num"><span>Tief ${eur(Math.min(...vals), 0)} · Hoch ${eur(Math.max(...vals), 0)}</span>
+        <span style="color:${col}">${change >= 0 ? "+" : "−"}${eur(Math.abs(change), 0)} (${pct(change / first.value)})</span></div>`;
   }
 
   pillars(d, active) {
@@ -338,9 +396,9 @@ class SaeulenwaechterCard extends SaeulenBase {
       body = `<div class="section note">Lade …</div>`;
     } else if (cfg.pillar && d.pillars[cfg.pillar]) {
       const p = d.pillars[cfg.pillar];
-      body = this.hero(p, d) + this.position(p) + this.signals(p) + this.pillars(d, p.key);
+      body = this.alert(d, p.key) + this.hero(p, d) + this.position(p) + this.signals(p) + this.pillars(d, p.key);
     } else {
-      body = this.stats(d) + `<div class="section"><div class="label">${esc(cfg.title || "Säulenwächter")} · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
+      body = this.alert(d) + this.stats(d) + `<div class="section"><div class="label">${esc(cfg.title || "Säulenwächter")} · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
         ${this.overviewRows(d, false)}</div>` + this.pillars(d, null);
     }
     this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card>${body}</ha-card>`;
@@ -374,6 +432,7 @@ class SaeulenwaechterPanel extends SaeulenBase {
         <div class="cols">
           <div>
             <ha-card>
+              ${this.alert(d)}
               ${this.stats(d)}
               <div class="section">
                 <div class="label">Übersicht</div>

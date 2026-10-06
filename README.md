@@ -42,8 +42,13 @@ Physical Gold, EUWAX Gold II, iShares und Invesco Physical Gold (Gold), iShares 
 Euro-Staatsanleihen (Anleihen). Weitere ISINs lassen sich in den Optionen je Säule eintragen. Positionen, die zu
 keiner Säule passen, zeigt die Karte als „nicht zugeordnet“ (mit Vorschlag) und meldet sie einmal per WhatsApp.
 
-**Säulenstatistik (ganz oben):** Gesamtwert, Einstand und Gewinn/Verlust aller Säulen, darunter je Säule
-Wert, Einstand und Gewinn/Verlust der offenen Position (Säulen in Cash ohne Gewinn/Verlust).
+**Handlung nötig (ganz oben, rot):** Weicht das Depot von der Strategie ab (kaufen, verkaufen, wechseln) oder
+ist Angleichen fällig, steht ganz oben ein roter, pulsierender Kasten mit der genauen Anweisung je Säule. Er
+verschwindet, sobald das Depot zum Ziel passt.
+
+**Säulenstatistik:** Gesamtwert, Einstand und Gewinn/Verlust aller Säulen, darunter je Säule
+Wert, Einstand und Gewinn/Verlust der offenen Position (Säulen in Cash ohne Gewinn/Verlust). Darunter der
+Verlauf des Gesamtwerts, einmal täglich aufgezeichnet (bis zu zwei Jahre).
 
 **Verteilung bei Trade Republic:** Unter jedem Säulen-Balken zeigt ein zweiter, lila Balken den Anteil im
 TR-Depot (erkannte Positionen + Cash) mit dem Soll laut aktueller Entscheidung als Strich, dazu eine Cash-Zeile.

@@ -164,6 +164,14 @@ async def test_depot_login_actions_and_reauth(hass, mocked, sent, freezer, monke
         print("\n----- WhatsApp Depot #1 -----\n" + sent[-1])
         assert "KOMPLETT VERKAUFEN: Xtrackers Eurozone Gov Bond" in sent[-1]
         assert "KAUFEN: Xetra-Gold" in sent[-1]
+        coord = hass.data[DOMAIN][entry.entry_id]
+        todo = {t["key"]: t for t in coord.data["todo"]}
+        assert set(todo) == {"gold", "anleihen"}
+        assert todo["gold"]["text"].startswith("KAUFEN: Xetra-Gold")
+        assert todo["anleihen"]["text"].startswith("KOMPLETT VERKAUFEN")
+        import os
+        if os.environ.get("SW_DUMP_TODO"):
+            Path(os.environ["SW_DUMP_TODO"]).write_text(json.dumps(coord.data, default=str))
 
         # Nutzer hat umgesetzt
         n = len(sent)
@@ -172,6 +180,7 @@ async def test_depot_login_actions_and_reauth(hass, mocked, sent, freezer, monke
         coord = hass.data[DOMAIN][entry.entry_id]
         await coord.async_refresh()
         assert len(sent) == n + 1
+        assert coord.data["todo"] == []
         print("\n----- WhatsApp Depot #2 -----\n" + sent[-1])
         assert sent[-1].count("umgesetzt") == 2
 
@@ -208,6 +217,9 @@ async def test_depot_login_actions_and_reauth(hass, mocked, sent, freezer, monke
         assert stats["gold"]["pnl"] == pytest.approx(80 * (366.0 - 350.0))
         assert stats["anleihen"]["pnl"] is None
         assert "statistik" in hass.states.get("sensor.saeulenwaechter_depotwert").attributes
+        hist = coord.data["value_history"]
+        assert len(hist) == 1 and hist[0]["mode"] == "depot"
+        assert hist[0]["value"] == pytest.approx(coord.data["stats"]["total"]["value"], abs=0.01)
         import os
         if os.environ.get("SW_DUMP_DEPOT"):
             Path(os.environ["SW_DUMP_DEPOT"]).write_text(json.dumps(coord.data, default=str))

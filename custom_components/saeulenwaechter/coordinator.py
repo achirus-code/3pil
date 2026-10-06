@@ -181,6 +181,11 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
             await self._update_macro(now)
             depot = await self._update_depot()
             data = self._compute(now, depot)
+            # Tagesverlauf nur mit echten Werten (Papierdepot oder verbundenes Depot)
+            if data["mode"] == "paper" or depot.get("connected"):
+                self.state["value_history"] = S.record_history(self.state.get("value_history", []),
+                                                               now.date().isoformat(), data["stats"], data["mode"])
+            data["value_history"] = [h for h in self.state.get("value_history", []) if h.get("mode") == data["mode"]]
             await self._notify(now, data)
             await self.async_save()
             return data
@@ -420,6 +425,9 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
                 "history": st.get("history", []),
             }
             out_pillars[key]["status"] = self._status_text(out_pillars[key], res, today)
+            # Handlungsbedarf im echten Depot: die genaue Anweisung für die Karte
+            out_pillars[key]["instruction"] = (self._instruction(out_pillars[key], False)
+                                               if mode == "depot" and action in ("buy", "sell", "switch") else None)
 
         overview = S.pillars_overview(values, amounts)
         # Verteilung bei Trade Republic: nur erkannte Positionen + Cash, gegen das Soll laut Strategie
@@ -439,12 +447,21 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
             out_pillars[row["key"]].update(ist=row["ist"], soll=row["soll"], diff_pp=row["diff_pp"],
                                            target_value=row["target_value"])
 
+        # Alles, was jetzt im Depot geändert werden muss (rot oben in der Karte)
+        todo = [{"key": k, "name": p["name"], "action": p["action"], "action_label": p["action_label"],
+                 "text": p["instruction"]} for k, p in out_pillars.items() if p.get("instruction")]
+        if overview["due"] and not todo:
+            todo.append({"key": "rebalance", "name": "Angleichen", "action": "rebalance", "action_label": "angleichen",
+                         "text": "ANGLEICHEN: " + " · ".join(
+                             f"{out_pillars[r['key']]['name']} {S.fmt_eur(r['value'], 0)} → {S.fmt_eur(r['target_value'], 0)}"
+                             for r in overview["rows"] if abs(r["diff_pp"]) >= 0.5)})
         stats = S.pillar_stats([{"key": k, "name": p["name"], "value": p["value"], "held": p["held"]}
                                 for k, p in out_pillars.items()])
         return {
             "updated": now.isoformat(),
             "mode": mode,
             "stats": stats,
+            "todo": todo,
             "market_open": is_open,
             "next_check": S.next_check_date(today).isoformat(),
             "pillars": out_pillars,

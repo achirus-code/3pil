@@ -248,3 +248,16 @@ def test_pillar_stats_value_cost_and_profit():
     assert rows["gold"]["pnl"] == -3_000.0
     assert rows["anleihen"]["pnl"] is None and rows["anleihen"]["invested"] is False
     assert st["total"] == {"value": 101_000.0, "cost": 70_000.0, "pnl": 1_000.0, "pnl_pct": pytest.approx(1 / 70)}
+
+
+def test_record_history_one_entry_per_day_and_capped():
+    stats = {"total": {"value": 100.0, "cost": 90.0, "pnl": 10.0},
+             "rows": [{"key": "welt", "value": 60.0}, {"key": "gold", "value": 40.0}]}
+    h = S.record_history([], "2026-10-06", stats, "depot")
+    stats2 = {"total": {"value": 101.0, "cost": None, "pnl": None}, "rows": [{"key": "welt", "value": 101.0}]}
+    h = S.record_history(h, "2026-10-06", stats2, "depot")  # später am selben Tag: ersetzt
+    assert len(h) == 1 and h[0]["value"] == 101.0 and h[0]["cost"] is None
+    for day in ("2026-10-08", "2026-10-07"):
+        h = S.record_history(h, day, stats, "depot", max_days=2)
+    assert [x["date"] for x in h] == ["2026-10-07", "2026-10-08"]
+    assert h[-1]["pillars"] == {"welt": 60.0, "gold": 40.0}
