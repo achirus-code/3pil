@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.1.0
+
+- **Login per QR-Code:** in der Oberfläche den QR-Code mit der Handy-Kamera oder der Trade-Republic-App scannen und
+  in der App bestätigen – ohne PIN und ohne Authenticator-Code. Der Code erneuert sich automatisch.
+- **Physisches Gold:** Barren und Münzen mit Menge (g oder oz), Feingehalt und Kaufpreis eintragen. Das Gold zählt
+  zur Gold-Säule (Wert, Statistik, Verlauf, Bestandsbalken), wird mit dem Goldpreis je Gramm (Xetra-Gold)
+  bewertet; Kaufanweisungen ziehen es ab, bei einem Verkaufssignal bleibt es liegen. Neue Entität
+  `sensor.saeulenwaechter_physisches_gold`.
+- Die App meldet Trade Republic jetzt die aktuelle Version der Web-App (automatisch ermittelt) und die richtige
+  Zeitzone (Sommerzeit).
+
+## 2.0.2
+
+- Trade-Republic-Login mit Authenticator-Code: ein abgelehnter Code (`AUTHENTICATION_ERROR`) zeigt jetzt
+  „Code nicht angenommen“, der Login bleibt offen und ein neuer Code lässt sich ohne PIN eingeben.
+- Code wird bereinigt (Leerzeichen), nach dem Code wartet die App auf die Session wie die TR-Web-App.
+- Verlangt Trade Republic während der App-Bestätigung doch einen Code, wechselt die Seite dorthin.
+- Abgelehnte Login-Schritte stehen mit Status und Fehlercode von Trade Republic im App-Protokoll.
+
 ## 2.0.1
 
 - Installation schlug fehl („pip: not found“): Der Supervisor hat `build.yaml` verworfen und mit seinem

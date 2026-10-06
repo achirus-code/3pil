@@ -32,6 +32,20 @@
   .login .err { color:#ff3b30; margin-top:8px; }
   .login .ok { color:#34c759; }
   .hidden { display:none !important; }
+  .qr-wrap { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  .qr-box { width:220px; height:220px; display:flex; align-items:center; justify-content:center; background:#fff;
+            color:#000; border-radius:12px; overflow:hidden; font-size:13px; }
+  .qr-box svg { width:100%; height:100%; }
+  .qr-box.dim { opacity:.25; }
+  .qr-state { flex:1; min-width:180px; font-weight:600; }
+  .login select { font:inherit; padding:8px 10px; border:1px solid var(--divider-color); border-radius:8px;
+                  background:transparent; color:inherit; }
+  .gold-table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+  .gold-table th { text-align:right; font-weight:500; color:var(--secondary-text-color); padding:4px; }
+  .gold-table td { text-align:right; padding:5px 4px; border-top:1px solid var(--divider-color); white-space:nowrap; }
+  .gold-table th:first-child, .gold-table td:first-child { text-align:left; white-space:normal; }
+  .gold-table .x { background:transparent; color:#ff3b30; border:0; cursor:pointer; font-size:16px; padding:0 4px; }
+  .pos { color:#34c759; } .neg { color:#ff3b30; }
 </style>
 <script>
   // Minimaler Ersatz für die Home-Assistant-Elemente, die die Karte benutzt
@@ -63,7 +77,16 @@
 <div class="wrap">
   <div id="login" class="login hidden">
     <h2>Trade-Republic-Login</h2>
-    <p id="login-hint">Telefonnummer und 4-stellige PIN. Die PIN wird nicht gespeichert, nur die Web-Session.
+    <div id="step-qr">
+      <p>Mit der Handy-Kamera oder in der Trade-Republic-App scannen und die Anmeldung in der App bestätigen.
+        Keine PIN nötig. Gespeichert wird nur die Web-Session.</p>
+      <div class="qr-wrap"><div id="qr-box" class="qr-box">Lade QR-Code …</div><div id="qr-state" class="qr-state"></div></div>
+      <div class="row" style="margin-top:10px">
+        <button id="btn-qr-new" class="ghost hidden">Neuer QR-Code</button>
+        <button id="btn-use-pin" class="ghost">Stattdessen mit Telefonnummer und PIN</button>
+      </div>
+    </div>
+    <p id="login-hint" class="hidden">Telefonnummer und 4-stellige PIN. Die PIN wird nicht gespeichert, nur die Web-Session.
       Ohne Login rechnet der Säulenwächter mit einem Papierdepot.</p>
     <div id="step-start" class="row">
       <input id="phone" type="tel" placeholder="Telefonnummer (+49…)" autocomplete="tel">
@@ -81,6 +104,23 @@
     <div id="login-msg" class="err"></div>
   </div>
   <saeulenwaechter-panel id="panel"></saeulenwaechter-panel>
+  <div class="login" id="gold" style="margin-top:16px">
+    <h2>Physisches Gold</h2>
+    <p>Gold, das du außerhalb von Trade Republic besitzt (Barren, Münzen). Es zählt zur Gold-Säule und wird mit dem
+      aktuellen Goldpreis bewertet (<span id="gold-price">–</span>). Kaufanweisungen ziehen es ab, bei einem
+      Verkaufssignal bleibt es liegen.</p>
+    <table class="gold-table" id="gold-table"></table>
+    <div class="row" style="margin-top:10px">
+      <input id="g-name" placeholder="Bezeichnung, z. B. 1 oz Krügerrand" style="flex:2;min-width:180px">
+      <input id="g-qty" inputmode="decimal" placeholder="Menge" size="7">
+      <select id="g-unit"><option value="g">Gramm</option><option value="oz">Unzen (oz)</option></select>
+      <input id="g-fine" inputmode="decimal" value="999,9" size="6" title="Feingehalt in ‰ (999,9 Barren, 916,7 Krügerrand)">
+      <input id="g-cost" inputmode="decimal" placeholder="Kaufpreis gesamt €" size="12">
+      <input id="g-date" type="date" title="Kaufdatum">
+      <button id="btn-gold-add">Hinzufügen</button>
+    </div>
+    <div id="gold-msg" class="err"></div>
+  </div>
   <div class="login" style="margin-top:16px">
     <div class="row">
       <span id="login-state" style="flex:1"></span>
@@ -95,7 +135,7 @@
     const r = await fetch(path, body === undefined ? { cache: "no-store" } :
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    if (!r.ok) { const e = new Error(j.error || `HTTP ${r.status}`); e.step = j.step; throw e; }
     return j;
   }
   const hass = {
@@ -111,7 +151,39 @@
   const panel = $("panel");
 
   function step(name) {
-    for (const s of ["start", "code", "confirm"]) show("step-" + s, s === name);
+    for (const s of ["qr", "start", "code", "confirm"]) show("step-" + s, s === name);
+    show("login-hint", name === "start");
+    if (name !== "qr") stopQr(true);
+  }
+  // ---- QR-Login: Code wechselt alle ~10 s, die Challenge läuft nach 60 s ab und wird neu gestartet
+  let qrTimer = null, qrRestarts = 0;
+  function stopQr(cancel) {
+    if (qrTimer) { clearTimeout(qrTimer); qrTimer = null; }
+    if (cancel) fetch("api/login/qr", { method: "DELETE" }).catch(() => {});
+  }
+  function qrShow(r) {
+    const box = $("qr-box"), state = $("qr-state");
+    if (r.svg) { box.innerHTML = r.svg; box.classList.remove("dim"); }
+    show("btn-qr-new", false);
+    if (r.status === "pending") state.textContent = "Bereit zum Scannen";
+    else if (r.status === "claimed") { box.classList.add("dim"); state.textContent = "Gescannt – bitte jetzt in der Trade-Republic-App bestätigen …"; }
+    else if (r.status === "error") { box.classList.add("dim"); state.textContent = r.error || "Fehler"; show("btn-qr-new", true); }
+    else if (r.status === "expired") { box.classList.add("dim"); state.textContent = "QR-Code abgelaufen."; show("btn-qr-new", true); }
+  }
+  async function qrPoll() {
+    qrTimer = null;
+    let r;
+    try { r = await api("api/login/qr"); } catch (e) { qrShow({ status: "error", error: e.message }); return; }
+    if (r.status === "done") { $("qr-state").textContent = "Angemeldet ✓"; await done(); return; }
+    if (r.status === "expired" && qrRestarts < 5) { qrRestarts++; return qrStart(); }
+    qrShow(r);
+    if (r.status === "pending" || r.status === "claimed") qrTimer = setTimeout(qrPoll, 1000);
+  }
+  async function qrStart() {
+    stopQr(false);
+    $("qr-box").classList.add("dim");
+    try { qrShow(await api("api/login/qr", {})); } catch (e) { qrShow({ status: "error", error: e.message }); return; }
+    qrTimer = setTimeout(qrPoll, 1000);
   }
   async function status() {
     let s;
@@ -125,16 +197,26 @@
   }
   async function guarded(fn) {
     $("login-msg").textContent = "";
-    try { await fn(); } catch (e) { $("login-msg").textContent = e.message; }
+    try { await fn(); } catch (e) {
+      $("login-msg").textContent = e.message;
+      if (e.step === "code") { step("code"); $("code").value = ""; $("code").focus(); }
+    }
   }
-  $("btn-login").onclick = () => { show("login", true); step("start"); $("phone").focus(); };
+  $("btn-login").onclick = () => { show("login", true); step("qr"); qrRestarts = 0; qrStart(); };
+  $("btn-qr-new").onclick = () => { qrRestarts = 0; qrStart(); };
+  $("btn-use-pin").onclick = () => { step("start"); $("phone").focus(); };
   $("btn-start").onclick = () => guarded(async () => {
     const r = await api("api/login/start", { phone: $("phone").value, pin: $("pin").value });
     $("pin").value = "";
     step(r.kind === "AUTHENTICATOR_VERIFICATION" ? "code" : "confirm");
   });
-  const done = async () => { show("login", false); panel._load && panel._load(); await status(); };
-  $("btn-code").onclick = () => guarded(async () => { await api("api/login/complete", { code: $("code").value }); await done(); });
+  const done = async () => { stopQr(false); show("login", false); panel._load && panel._load(); await status(); };
+  $("btn-code").onclick = () => guarded(async () => {
+    $("login-msg").textContent = "Prüfe den Code …";
+    await api("api/login/complete", { code: $("code").value });
+    await done();
+  });
+  $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-code").click(); });
   $("btn-confirm").onclick = () => guarded(async () => {
     $("login-msg").textContent = "Warte auf die Bestätigung …";
     await api("api/login/complete", {});
@@ -146,12 +228,53 @@
     await done();
   });
 
+  // ---- physisches Gold
+  const gEur = (v, d = 0) => v == null ? "–" : v.toLocaleString("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: d, minimumFractionDigits: d });
+  const gNum = (v, d = 2) => v == null ? "–" : v.toLocaleString("de-DE", { maximumFractionDigits: d });
+  const esc2 = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  async function loadGold() {
+    let g;
+    try { g = await api("api/gold"); } catch (e) { return; }
+    $("gold-price").textContent = g.price_g ? `${gEur(g.price_g, 2)} je Gramm` : "Goldpreis noch nicht geladen";
+    const rows = g.items.map((i) => {
+      const cls = i.pnl == null ? "" : i.pnl >= 0 ? "pos" : "neg";
+      return `<tr><td>${esc2(i.name)}${i.bought ? `<div style="font-size:11px;color:var(--secondary-text-color)">gekauft ${new Date(i.bought).toLocaleDateString("de-DE")}</div>` : ""}</td>
+        <td>${gNum(i.qty, 3)} ${i.unit === "oz" ? "oz" : "g"} · ${gNum(i.fineness, 1)} ‰</td><td>${gNum(i.fine_grams, 2)} g</td>
+        <td>${gEur(i.cost)}</td><td>${gEur(i.value)}</td><td class="${cls}">${i.pnl == null ? "–" : (i.pnl >= 0 ? "+" : "−") + gEur(Math.abs(i.pnl))}</td>
+        <td><button class="x" title="Entfernen" data-del="${esc2(i.id)}">✕</button></td></tr>`;
+    }).join("");
+    $("gold-table").innerHTML = g.items.length
+      ? `<tr><th>Bezeichnung</th><th>Menge</th><th>Feingold</th><th>Kaufpreis</th><th>Wert heute</th><th>Ergebnis</th><th></th></tr>${rows}
+         <tr><td><b>Gesamt</b></td><td></td><td><b>${gNum(g.fine_grams, 2)} g</b></td><td><b>${gEur(g.cost)}</b></td><td><b>${gEur(g.value)}</b></td>
+         <td class="${g.value == null ? "" : g.value - g.cost >= 0 ? "pos" : "neg"}"><b>${g.value == null ? "–" : (g.value - g.cost >= 0 ? "+" : "−") + gEur(Math.abs(g.value - g.cost))}</b></td><td></td></tr>`
+      : `<tr><td style="color:var(--secondary-text-color)">Noch nichts eingetragen.</td></tr>`;
+    for (const b of document.querySelectorAll("[data-del]")) b.onclick = async () => {
+      if (!confirm("Diesen Eintrag entfernen?")) return;
+      await fetch("api/gold/" + encodeURIComponent(b.dataset.del), { method: "DELETE" });
+      await loadGold(); panel._load && panel._load();
+    };
+  }
+  $("btn-gold-add").onclick = async () => {
+    $("gold-msg").textContent = "";
+    // deutsch (1.234,5) oder mit Punkt als Dezimaltrenner (31.1)
+    const toNum = (v) => { v = v.trim(); if (v === "") return null; return Number(v.includes(",") ? v.replace(/\./g, "").replace(",", ".") : v); };
+    const body = { name: $("g-name").value, qty: toNum($("g-qty").value), unit: $("g-unit").value,
+                   fineness: toNum($("g-fine").value), cost: toNum($("g-cost").value) ?? 0, bought: $("g-date").value || null };
+    if (!body.qty) { $("gold-msg").textContent = "Bitte die Menge eintragen."; return; }
+    try { await api("api/gold", body); } catch (e) { $("gold-msg").textContent = e.message; return; }
+    for (const id of ["g-name", "g-qty", "g-cost", "g-date"]) $(id).value = "";
+    await loadGold(); panel._load && panel._load();
+  };
+  loadGold();
+  setInterval(loadGold, 60000);
+
+  for (const s of ["start", "code", "confirm"]) show("step-" + s, false);
   panel.hass = hass;
   status();
   // abgelaufener Login: Anmeldung direkt anbieten
   setInterval(async () => {
     const d = panel._data;
-    if (d && d.depot && d.depot.error === "auth") show("login", true);
+    if (d && d.depot && d.depot.error === "auth" && $("login").classList.contains("hidden")) $("btn-login").click();
   }, 5000);
 </script>
 </body>

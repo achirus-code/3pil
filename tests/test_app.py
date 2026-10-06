@@ -233,6 +233,17 @@ async def test_web_data_actions_and_login(make_engine, sent, aiohttp_client, mon
     assert eng.data["mode"] == "depot" and eng.state["cookies"]["tr_session"] == "s"
     assert '"7391"' not in json.dumps(eng.state) and "pin" not in eng.state  # die PIN wird nie gespeichert
 
+    # abgelehnter Authenticator-Code: Oberfläche bleibt im Code-Schritt
+    async def code_rejected(self, code=None, wait=20.0):
+        from sw.tr_api import TRCodeRejected
+        raise TRCodeRejected("Der Code wurde nicht angenommen")
+
+    monkeypatch.setattr(TradeRepublic, "login_complete", code_rejected)
+    await client.post("/api/login/start", json={"phone": "0170 1234567", "pin": "7391"})
+    r = await client.post("/api/login/complete", json={"code": "111111"})
+    assert r.status == 409 and (await r.json())["step"] == "code"
+    assert eng.login_status()["pending"]  # Vorgang bleibt offen, neuer Code möglich
+
     await client.post("/api/logout", json={})
     assert not (await (await client.get("/api/login")).json())["logged_in"]
     assert eng.data["mode"] == "paper"
@@ -277,3 +288,112 @@ async def test_states_for_home_assistant(make_engine, aiohttp_client):
         assert await pub.publish(d) == len(states)
         assert got["sensor.saeulenwaechter_gold_zustand"]["state"] == "Investiert"
         assert await HomeAssistantPublisher(http, token="").publish(d) == 0  # ohne Token: nichts
+
+
+# ------------------------------------------------------------------ physisches Gold
+
+async def test_physical_gold_counts_into_gold_pillar(make_engine, market, monkeypatch):
+    eng = await make_engine()
+    price = market["DE000A0S9GB0"]["price"]["bid"]
+    await eng.add_physical_gold("1 oz Krügerrand", 1, "oz", 916.7, 2500.0, "2024-03-01")
+    entry = eng.state["physical_gold"][0]
+    assert entry["fine_grams"] == pytest.approx(31.1034768 * 0.9167, abs=1e-3)
+    d = eng.data
+    gold = d["pillars"]["gold"]
+    phys_value = entry["fine_grams"] * price
+    assert gold["physical_value"] == pytest.approx(phys_value)
+    # Papierdepot kauft nur, was das physische Gold nicht abdeckt
+    paper = [h for h in gold["held"] if not h.get("physical")][0]
+    assert paper["cost"] == pytest.approx(30000 - phys_value, abs=1)
+    assert gold["value"] == pytest.approx(30000, rel=0.01)
+    assert {p["name"] for p in d["tr_split"]["rows"][1]["parts"]} >= {"Physisches Gold · 1 oz Krügerrand"}
+    stats = {r["key"]: r for r in d["stats"]["rows"]}
+    assert stats["gold"]["cost"] == pytest.approx(paper["cost"] + 2500.0)
+    assert d["physical_gold"]["value"] == pytest.approx(phys_value)
+    assert (await eng.remove_physical_gold(entry["id"])) and eng.state["physical_gold"] == []
+
+
+async def test_physical_gold_in_depot_instructions(make_engine, market, monkeypatch):
+    depot = {"positions": {"IE00B3YLTY66": {"size": 3350.0, "avg_buy": 11.0}}, "cash": 30000.0}
+
+    async def portfolio(self):
+        return depot
+
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    eng = await make_engine()
+    eng.tr.cookies = {"tr_session": "s"}
+    price = market["DE000A0S9GB0"]["price"]["bid"]
+    await eng.add_physical_gold("Barren", 100, "g", 999.9, 9000.0)
+    gold = eng.data["pillars"]["gold"]
+    assert gold["action"] == "buy"
+    assert gold["buy_budget"] == pytest.approx(30000 - 100 * 0.9999 * price)
+    assert "schon abgezogen" in gold["instruction"]
+    # deckt das Gold die Säule ab, ist nichts zu kaufen
+    await eng.add_physical_gold("Großbarren", 1000, "g", 999.9, 90000.0)
+    assert eng.data["pillars"]["gold"]["action"] == "hold"
+
+
+async def test_web_gold_api(make_engine, aiohttp_client):
+    eng = await make_engine()
+    client = await aiohttp_client(make_app(eng, allowed=()))
+    assert (await client.post("/api/gold", json={"qty": 0})).status == 400
+    r = await client.post("/api/gold", json={"name": "Münze", "qty": "1,5", "unit": "oz", "fineness": "999,9",
+                                             "cost": "3.900,50"})
+    assert r.status == 200
+    entry = await r.json()
+    assert entry["cost"] == 3900.5 and entry["qty"] == 1.5
+    g = await (await client.get("/api/gold")).json()
+    assert len(g["items"]) == 1 and g["price_g"] > 0 and g["value"] > 0
+    assert (await client.delete(f"/api/gold/{entry['id']}")).status == 200
+    assert (await client.delete("/api/gold/nope")).status == 404
+
+
+# ------------------------------------------------------------------ QR-Login
+
+async def test_web_qr_login(make_engine, aiohttp_client, monkeypatch):
+    eng = await make_engine()
+    polls = iter([{"status": "PENDING", "qrCodePayload": "https://traderepublic.com/web-login/challenge?c=1&t=a"},
+                  {"status": "CLAIMED", "processId": "p1"}])
+
+    async def qr_start(self):
+        self._qr_challenge = "c1"
+        return {"challengeId": "c1"}
+
+    async def qr_poll(self):
+        body = next(polls)
+        if body["status"] == "CLAIMED":
+            self._process_id = body["processId"]
+        return body
+
+    async def qr_complete(self, wait=120.0):
+        self.cookies = {"tr_session": "s", "tr_refresh": "r"}
+        self.sec_acc_no = "9"
+
+    async def portfolio(self):
+        return {"positions": {}, "cash": 500.0}
+
+    for name, fn in (("qr_start", qr_start), ("qr_poll", qr_poll), ("qr_complete", qr_complete),
+                     ("portfolio", portfolio)):
+        monkeypatch.setattr(TradeRepublic, name, fn)
+    client = await aiohttp_client(make_app(eng, allowed=()))
+    r = await (await client.post("/api/login/qr", json={})).json()
+    assert r["status"] == "pending" and r["svg"].startswith("<svg")
+    r = await (await client.get("/api/login/qr")).json()
+    assert r["status"] == "claimed"
+    await eng._qr["task"]
+    r = await (await client.get("/api/login/qr")).json()
+    assert r["status"] == "done"
+    assert eng.login_status()["logged_in"] and eng.state["login_method"] == "qr"
+    assert eng.data["mode"] == "depot"
+
+
+def test_page_and_card_share_no_global_names():
+    """Seite und Karte laufen als klassische Skripte im selben globalen Bereich – doppelte Namen brechen die Seite."""
+    import re
+    www = Path(__file__).parents[1] / "saeulenwaechter" / "app" / "www"
+    page = (www / "index.html").read_text()
+    card = (www / "saeulenwaechter-card.js").read_text()
+    names = re.compile(r"^\s*(?:const|let|var|function|async function|class)\s+([A-Za-z_$][\w$]*)", re.M)
+    page_top = set(names.findall("\n".join(re.findall(r"<script>(.*?)</script>", page, re.S))))
+    card_top = set(re.findall(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)", card, re.M))
+    assert not page_top & card_top

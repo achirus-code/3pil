@@ -15,9 +15,10 @@ mit einer konkreten Anweisung. Er **handelt nie selbst**.
    dauert beim ersten Mal ein paar Minuten).
 3. Im Reiter **Konfiguration** Gesamtbetrag, WhatsApp-Nummer (z. B. `4917…`) und CallMeBot-API-Key eintragen,
    dann **Starten**. „In Seitenleiste anzeigen“ einschalten.
-4. In der Oberfläche (Seitenleiste „Säulenwächter“) unten **Bei Trade Republic anmelden**: Telefonnummer und PIN,
-   danach in der TR-App bestätigen oder den Authenticator-Code eingeben. Gespeichert wird **nur die Web-Session**
-   (in `/data` der App), nie die PIN. Ohne Login rechnet der Säulenwächter mit einem Papierdepot.
+4. In der Oberfläche (Seitenleiste „Säulenwächter“) unten **Bei Trade Republic anmelden**: den **QR-Code** mit der
+   Handy-Kamera oder der TR-App scannen und in der App bestätigen – oder Telefonnummer und PIN, danach in der App
+   bestätigen bzw. den Authenticator-Code eingeben. Gespeichert wird **nur die Web-Session** (in `/data` der
+   App), nie die PIN. Ohne Login rechnet der Säulenwächter mit einem Papierdepot.
 
 Updates kommen über den App-Store von Home Assistant, sobald hier eine neue Version veröffentlicht ist.
 
@@ -34,6 +35,10 @@ Vanguard FTSE Global All-Cap / FTSE All-World, iShares Core MSCI World und MSCI 
 Physical Gold, EUWAX Gold II, iShares und Invesco Physical Gold (Gold), iShares und Vanguard
 Euro-Staatsanleihen (Anleihen). Weitere ISINs lassen sich in den Optionen je Säule eintragen. Positionen, die zu
 keiner Säule passen, zeigt die Karte als „nicht zugeordnet“ (mit Vorschlag) und meldet sie einmal per WhatsApp.
+
+**Physisches Gold:** Barren und Münzen, die du zuhause hast, mit Menge, Feingehalt und Kaufpreis eintragen. Sie
+zählen zur Gold-Säule (bewertet mit dem Goldpreis je Gramm), Kaufanweisungen ziehen sie ab, bei einem
+Verkaufssignal bleiben sie liegen.
 
 **Handlung nötig (ganz oben, rot):** Weicht das Depot von der Strategie ab (kaufen, verkaufen, wechseln) oder
 ist Angleichen fällig, steht ganz oben ein roter, pulsierender Kasten mit der genauen Anweisung je Säule. Er
@@ -56,7 +61,7 @@ Hält eine Säule mehrere Produkte (z. B. zwei Welt-ETFs), ist der Balken je Pro
 | `sensor.saeulenwaechter_<säule>_wert`, `_ist_anteil` | Wert zum Geldkurs, Ist-% (Attribut Soll-%) |
 | `sensor.saeulenwaechter_<säule>_umschaltkurs`, `_kurs` | Monatsschluss, bei dem das Signal kippt; aktueller Kurs |
 | `binary_sensor.saeulenwaechter_<säule>_trend` / `_wuerde_kippen` | Trend an/aus; würde zum Monatsende kippen |
-| `sensor.saeulenwaechter_depotwert`, `_gewinn_verlust`, `_drift`, `_naechste_pruefung`, `_euro_zins`, `_dollar`, `_modus` | Übersicht |
+| `sensor.saeulenwaechter_depotwert`, `_gewinn_verlust`, `_physisches_gold`, `_drift`, `_naechste_pruefung`, `_euro_zins`, `_dollar`, `_modus` | Übersicht |
 | `binary_sensor.saeulenwaechter_rezession_{unemployment,claims,yield_curve}` | Rezessionszeichen |
 | `binary_sensor.saeulenwaechter_angleichung_faellig`, `_handlung_noetig`, `_trade_republic` | Drift ≥ 5 Pp; Depot weicht ab (Attribut: Anweisungen); Login-Status |
 
