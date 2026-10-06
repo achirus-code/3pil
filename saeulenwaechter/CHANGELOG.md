@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.1
+
+- Rechte Spalte (Säulen-Details) schmaler: Übersicht 60 %, Details 40 %.
+
 ## 2.4.0
 
 - Säulen in Cash sind klar gekennzeichnet („in Cash“); die Angleichen-Tabelle sagt „als Cash halten“ / „aus Cash nehmen“ statt kaufen/verkaufen.

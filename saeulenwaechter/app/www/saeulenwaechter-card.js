@@ -499,7 +499,7 @@ class SaeulenwaechterPanel extends SaeulenBase {
       :host { padding: 16px; box-sizing: border-box; min-height: 100vh; background: var(--primary-background-color); }
       .top { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
       .top h1 { font-size:22px; margin:0; font-weight:600; color: var(--primary-text-color); }
-      .cols { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1.2fr); gap:16px; align-items:start; }
+      .cols { display:grid; grid-template-columns: minmax(0,1.5fr) minmax(0,1fr); gap:16px; align-items:start; }
       @media (max-width: 900px) { .cols { grid-template-columns: minmax(0,1fr); } }
     </style>
     <div class="top">
