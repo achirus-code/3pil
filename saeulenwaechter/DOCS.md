@@ -7,8 +7,11 @@
 2. **Starten** und „In Seitenleiste anzeigen“ einschalten.
 3. In der Oberfläche unten **Bei Trade Republic anmelden**: den QR-Code mit der Handy-Kamera oder der
    Trade-Republic-App scannen und in der App bestätigen. Alternativ Telefonnummer und 4-stellige PIN, danach
-   in der App bestätigen oder den Code aus der Authenticator-App eingeben. Gespeichert wird nur die Web-Session,
-   nie die PIN. Ohne Login rechnet die App mit einem Papierdepot.
+   in der App bestätigen oder den Code aus der Authenticator-App eingeben. Die App liest einmal Positionen, Cash
+   und Zinssatz, speichert diesen Stand und **schließt die Verbindung sofort wieder** – sie bleibt nie bei Trade
+   Republic angemeldet. Die Kurse laufen weiter; Stückzahlen und Cash bleiben auf dem Stand des letzten Abgleichs.
+   Nach Käufen oder Verkäufen auf **Neu synchronisieren** tippen und erneut anmelden. Gespeichert werden die
+   Telefonnummer und der Depotstand, nie die PIN. Ohne Abgleich rechnet die App mit einem Papierdepot.
 
 ## Physisches Gold
 
@@ -44,7 +47,7 @@ Minute erneuert.
 
 ## Daten und Sicherheit
 
-- Der Zustand (Entscheidungen, Papierdepot, Verlauf, TR-Session) liegt in `/data/state.json` der App und ist
+- Der Zustand (Entscheidungen, Papierdepot, Verlauf, Depotstand) liegt in `/data/state.json` der App und ist
   Teil der Home-Assistant-Sicherung.
 - Die Oberfläche ist nur über Home Assistant (Ingress) erreichbar.
 - Die Trade-Republic-API ist inoffiziell und kann sich ändern. Der Säulenwächter liest nur und handelt nie selbst.

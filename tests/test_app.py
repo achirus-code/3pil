@@ -64,6 +64,11 @@ async def make_engine(tmp_path, market, sent, monkeypatch):
         return True
 
     monkeypatch.setattr(engine_mod, "send_whatsapp", send)
+
+    async def tr_logout(self):
+        self.cookies = {}
+
+    monkeypatch.setattr(TradeRepublic, "logout", tr_logout)
     sessions = []
 
     async def factory(options=None, when="2026-10-06 10:00"):
@@ -171,6 +176,8 @@ async def test_depot_actions_recognition_and_expired_login(make_engine, sent, ma
     depot["positions"] = {"IE00B3YLTY66": {"size": 3350.0, "avg_buy": 11.0},
                           "DE000A0S9GB0": {"size": 250.0, "avg_buy": 118.5}}
     n = len(sent)
+    assert not eng.tr.logged_in  # nach dem Abgleich ist die Session wieder zu
+    eng.tr.cookies = {"tr_session": "s"}  # neu synchronisieren
     d = await eng.refresh()
     assert d["todo"] == [] and len(sent) == n + 1 and sent[-1].count("umgesetzt") == 2
 
@@ -181,6 +188,7 @@ async def test_depot_actions_recognition_and_expired_login(make_engine, sent, ma
     depot["positions"] = {"IE000VAHT5T0": {"size": 9000.0, "avg_buy": 4.3},
                           "JE00BN2CJ301": {"size": 80.0, "avg_buy": 350.0},
                           "US0378331005": {"size": 5.0, "avg_buy": 180.0}}
+    eng.tr.cookies = {"tr_session": "s"}
     d = await eng.refresh()
     assert d["pillars"]["welt"]["action"] == "hold" and d["pillars"]["gold"]["action"] == "hold"
     assert d["pillars"]["welt"]["held"][0]["counts_as_name"] == "SPDR MSCI ACWI IMI"
@@ -199,11 +207,19 @@ async def test_depot_actions_recognition_and_expired_login(make_engine, sent, ma
     assert {h["isin"] for h in d["pillars"]["welt"]["held"]} == {"IE000VAHT5T0", "US0378331005"}
 
     # Login abgelaufen: genau eine Meldung, keine Handlungsanweisung
-    depot = TRAuthError("abgelaufen")
+    # ohne Session: es gilt der gespeicherte Stand, mit aktuellen Kursen
     d = await eng2.refresh()
-    assert d["depot"]["error"] == "auth"
+    assert d["mode"] == "depot" and d["depot"]["synced_at"] and d["depot"]["error"] is None
+    assert {h["isin"] for h in d["pillars"]["welt"]["held"]} == {"IE000VAHT5T0", "US0378331005"}
+
+    # Login beim Neu-Synchronisieren abgelaufen: genau eine Meldung, der alte Stand bleibt
+    depot = TRAuthError("abgelaufen")
+    eng2.tr.cookies = {"tr_session": "s"}
+    d = await eng2.refresh()
+    assert d["depot"]["error"] == "auth" and not eng2.tr.logged_in
     assert "Login abgelaufen" in sent[-1] and "Säulenwächter-App" in sent[-1]
-    assert d["pillars"]["gold"]["action"] is None
+    assert d["depot"]["synced_at"]
+    eng2.tr.cookies = {"tr_session": "s"}
     await eng2.refresh()
     assert sum("Login abgelaufen" in s for s in sent) == 1
 
@@ -263,8 +279,8 @@ async def test_web_data_actions_and_login(make_engine, sent, aiohttp_client, mon
     r = await client.post("/api/login/complete", json={})
     assert r.status == 200
     status = await (await client.get("/api/login")).json()
-    assert status["logged_in"] and status["phone"] == "+491701234567"
-    assert eng.data["mode"] == "depot" and eng.state["cookies"]["tr_session"] == "s"
+    assert not status["logged_in"] and status["synced_at"] and status["phone"] == "+491701234567"
+    assert eng.data["mode"] == "depot" and eng.state["cookies"] == {}  # synchronisiert, Session geschlossen
     assert '"7391"' not in json.dumps(eng.state) and "pin" not in eng.state  # die PIN wird nie gespeichert
 
     # abgelehnter Authenticator-Code: Oberfläche bleibt im Code-Schritt
@@ -389,7 +405,7 @@ async def test_depot_empty_pillars_use_tr_cash(make_engine, monkeypatch):
     assert r["cash"] == 6000.0 and r["counted"] == pytest.approx(p["welt"]["value"]) and r["unassigned"] == 0
 
 
-async def test_depot_uses_trade_republic_values(make_engine, monkeypatch):
+async def test_depot_uses_trade_republic_values(make_engine, market, monkeypatch):
     # Bewertet wie Trade Republic, unbekannte Positionen werden im Abgleich ausgewiesen
     async def portfolio(self):
         return {"positions": {"IE00B3YLTY66": {"size": 100.0, "avg_buy": 10.0, "tr_value": 1234.0},
@@ -399,7 +415,9 @@ async def test_depot_uses_trade_republic_values(make_engine, monkeypatch):
     eng = await make_engine()
     eng.tr.cookies = {"tr_session": "s"}
     d = await eng.refresh()
-    assert d["pillars"]["welt"]["value"] == pytest.approx(1234.0)
+    bid = market["IE00B3YLTY66"]["price"]["bid"]
+    assert d["pillars"]["welt"]["value"] == pytest.approx(100 * bid)  # aktueller Kurs
+    assert d["depot"]["unassigned"][0]["value"] == pytest.approx(2000.0)  # ohne Kurs: Wert von TR
     r = d["reconcile"]
     assert r["tr_positions"] == 3234.0 and r["unassigned"] == pytest.approx(2000.0)
 
@@ -454,7 +472,8 @@ async def test_web_qr_login(make_engine, aiohttp_client, monkeypatch):
     await eng._qr["task"]
     r = await (await client.get("/api/login/qr")).json()
     assert r["status"] == "done"
-    assert eng.login_status()["logged_in"] and eng.state["login_method"] == "qr"
+    assert not eng.login_status()["logged_in"] and eng.login_status()["synced_at"]
+    assert eng.state["login_method"] == "qr"
     assert eng.data["mode"] == "depot"
 
 

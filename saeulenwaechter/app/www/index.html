@@ -31,6 +31,7 @@
   .login button.ghost { background:transparent; color:var(--primary-color); border:1px solid var(--divider-color); }
   .login .err { color:#ff3b30; margin-top:8px; }
   .login .ok { color:#34c759; }
+  .login .muted { font-size:12px; opacity:.7; }
   .hidden { display:none !important; }
   .qr-wrap { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
   .qr-box { width:220px; height:220px; display:flex; align-items:center; justify-content:center; background:#fff;
@@ -125,7 +126,7 @@
     <div class="row">
       <span id="login-state" style="flex:1"></span>
       <button id="btn-login" class="ghost">Bei Trade Republic anmelden</button>
-      <button id="btn-logout" class="ghost hidden">Abmelden</button>
+      <button id="btn-logout" class="ghost hidden">Depotdaten löschen</button>
     </div>
   </div>
 </div>
@@ -188,11 +189,14 @@
   async function status() {
     let s;
     try { s = await api("api/login"); } catch (e) { return; }
-    $("login-state").innerHTML = s.logged_in
-      ? `<span class="ok">● Trade Republic verbunden</span>${s.phone ? " · " + s.phone : ""}`
-      : "Nicht bei Trade Republic angemeldet – Papierdepot.";
-    show("btn-login", !s.logged_in);
-    show("btn-logout", s.logged_in);
+    const when = s.synced_at ? new Date(s.synced_at).toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" }) : null;
+    $("login-state").innerHTML = when
+      ? `<span class="ok">● Depot synchronisiert</span> am ${when} · ${s.positions} Positionen${s.phone ? " · " + s.phone : ""}
+         <br><span class="muted">Die Verbindung zu Trade Republic ist wieder geschlossen. Kurse laufen weiter, Stückzahlen und Cash bleiben auf diesem Stand.</span>`
+      : "Noch nicht mit Trade Republic synchronisiert – Papierdepot.";
+    $("btn-login").textContent = when ? "Neu synchronisieren" : "Bei Trade Republic anmelden";
+    show("btn-login", true);
+    show("btn-logout", !!when);
     if (s.phone && !$("phone").value) $("phone").value = s.phone;
   }
   async function guarded(fn) {
@@ -223,7 +227,7 @@
     await done();
   });
   $("btn-logout").onclick = () => guarded(async () => {
-    if (!confirm("Trade-Republic-Session löschen? Danach rechnet der Säulenwächter mit dem Papierdepot.")) return;
+    if (!confirm("Gespeicherte Depotdaten löschen? Danach rechnet der Säulenwächter mit dem Papierdepot.")) return;
     await api("api/logout", {});
     await done();
   });

@@ -160,3 +160,10 @@ def test_find_rate():
     assert find_rate({"details": {"rate": {"value": "1.75"}}}) == pytest.approx(0.0175)
     assert find_rate([{"x": 1}, {"interestRate": 0.02}]) == pytest.approx(0.02)
     assert find_rate({"foo": "bar"}) is None
+
+
+async def test_logout_closes_session():
+    tr, calls, _ = login_client({("POST", "logout"): [(200, None, {})]})
+    tr.cookies = {"tr_session": "s", "tr_refresh": "r"}
+    await tr.logout()
+    assert tr.cookies == {} and not tr.logged_in and calls[0][:2] == ("POST", "logout")
