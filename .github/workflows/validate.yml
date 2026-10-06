@@ -11,15 +11,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
-      - run: pip install pytest-homeassistant-custom-component
-      - name: HA-Frontend passend zur installierten HA-Version
-        run: |
-          V=$(python -c "import json,homeassistant.components.frontend as f,pathlib;print([r for r in json.loads((pathlib.Path(f.__file__).parent/'manifest.json').read_text())['requirements'] if r.startswith('home-assistant-frontend')][0])")
-          pip install "$V"
-      - run: python -m pytest tests tests_ha -q
-  hassfest:
+          python-version: "3.12"
+      - run: pip install -r saeulenwaechter/requirements.txt pytest pytest-asyncio pytest-aiohttp
+      - run: python -m pytest tests -q
+
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: home-assistant/actions/hassfest@master
+      - uses: frenck/action-addon-linter@v2
+        with:
+          path: "./saeulenwaechter"
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image so bauen, wie es der Supervisor tut (amd64)
+        run: docker build --build-arg BUILD_FROM=python:3.12-slim -t saeulenwaechter:test saeulenwaechter
+      - name: App startet und antwortet
+        run: |
+          mkdir -p /tmp/sw && echo '{"total": 100000, "notify": false, "use_depot": false}' > /tmp/sw/options.json
+          docker run -d --name sw -p 8099:8099 -e SW_ALLOW_ALL=1 -v /tmp/sw:/data saeulenwaechter:test
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8099/api/health && break; sleep 2; done
+          curl -fs http://127.0.0.1:8099/ | grep -q saeulenwaechter-panel
+          docker logs sw

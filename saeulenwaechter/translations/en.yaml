@@ -1,0 +1,33 @@
+configuration:
+  total:
+    name: Total amount (€)
+    description: Sum of the three pillars (40/30/30); the starting capital in paper mode. Changing it resets the amounts.
+  wa_phone:
+    name: WhatsApp number
+    description: International format without +, e.g. 4917…
+  wa_apikey:
+    name: CallMeBot API key
+    description: CallMeBot key for WhatsApp messages.
+  notify:
+    name: Send WhatsApp messages
+  monthly_report:
+    name: Monthly report even without changes
+  switch_warning:
+    name: Warn when a signal would flip at the month end
+  rebalance_month:
+    name: Month for the yearly rebalancing (1–12)
+  use_depot:
+    name: Use the real Trade Republic depot
+    description: After logging in on the app page. Off = paper depot.
+  extra_welt:
+    name: Additional ISINs World
+    description: Comma separated; count as SPDR MSCI ACWI IMI.
+  extra_gold:
+    name: Additional ISINs Gold
+    description: Comma separated; count as Xetra-Gold.
+  extra_anleihen:
+    name: Additional ISINs Bonds
+    description: Comma separated; count as Xtrackers Eurozone Gov Bond.
+  bls_key:
+    name: BLS API key (optional)
+    description: For more requests of the US unemployment rate.

@@ -1,39 +1,32 @@
 # 🏛️ Säulenwächter
 
-Home-Assistant-Integration für die **3-Säulen-Strategie** (Welt 40 % · Gold 30 % · Euro-Anleihen 30 %,
-Backtest-Variante „C7“, siehe [docs/3-saeulen-strategie.md](docs/3-saeulen-strategie.md)).
+Home-Assistant-**App** (früher „Add-on“) für die **3-Säulen-Strategie** (Welt 40 % · Gold 30 % ·
+Euro-Anleihen 30 %, Backtest-Variante „C7“, siehe [docs/3-saeulen-strategie.md](docs/3-saeulen-strategie.md)).
 
 Der Säulenwächter rechnet die komplette Monatslogik selbst nach – Trendsignale, Rezessionszeichen,
-Dollar-Signal, Ausweich-Anleihen, Umschaltkurse, Säulen-Drift – zeigt alles als Entitäten, Lovelace-Karte und
-eigenes Seitenleisten-Panel an und meldet **jede neue Erkenntnis per WhatsApp** (CallMeBot) mit einer konkreten
-Anweisung.
+Dollar-Signal, Ausweich-Anleihen, Umschaltkurse, Säulen-Drift – zeigt alles in einer eigenen Oberfläche in der
+Seitenleiste und als Entitäten in Home Assistant an und meldet **jede neue Erkenntnis per WhatsApp** (CallMeBot)
+mit einer konkreten Anweisung. Er **handelt nie selbst**.
 
 ## Installation
 
-1. **HACS:** *HACS › ⋮ › Benutzerdefinierte Repositories* → `https://github.com/achirus-code/3pil`, Typ
-   „Integration“ → „Säulenwächter“ herunterladen.
-   **Manuell:** `saeulenwaechter.zip` aus dem [neuesten Release](https://github.com/achirus-code/3pil/releases/latest)
-   nach `<HA-config>/custom_components/saeulenwaechter/` entpacken.
-2. Home Assistant neu starten.
-3. *Einstellungen › Geräte & Dienste › Integration hinzufügen › Säulenwächter*.
-   - **Mit Trade Republic verbinden (einmalig):** Telefonnummer + PIN, danach die Anmeldung in der TR-App
-     bestätigen (oder Authenticator-Code eingeben). Gespeichert wird **nur die Web-Session**, nicht die PIN.
-     Die Session wird alle 15 Minuten automatisch verlängert. Läuft sie doch ab, startet HA einen
-     „Erneut anmelden“-Dialog und du bekommst eine WhatsApp.
-   - **Ohne Login – Papierdepot:** alle Signale + simuliertes Depot (Market-Order, 1 € Gebühr, Erlös wieder anlegen).
-4. WhatsApp: Nummer (z. B. `4917…`) und CallMeBot-API-Key eintragen. Mit dem Button
-   **„WhatsApp-Testnachricht“** prüfen.
+1. *Einstellungen › Apps › App-Store › ⋮ › Repositories* → `https://github.com/achirus-code/3pil` hinzufügen.
+2. **Säulenwächter** installieren. Der Supervisor baut das Image dabei auf deinem Gerät (amd64 oder aarch64,
+   dauert beim ersten Mal ein paar Minuten).
+3. Im Reiter **Konfiguration** Gesamtbetrag, WhatsApp-Nummer (z. B. `4917…`) und CallMeBot-API-Key eintragen,
+   dann **Starten**. „In Seitenleiste anzeigen“ einschalten.
+4. In der Oberfläche (Seitenleiste „Säulenwächter“) unten **Bei Trade Republic anmelden**: Telefonnummer und PIN,
+   danach in der TR-App bestätigen oder den Authenticator-Code eingeben. Gespeichert wird **nur die Web-Session**
+   (in `/data` der App), nie die PIN. Ohne Login rechnet der Säulenwächter mit einem Papierdepot.
+
+Updates kommen über den App-Store von Home Assistant, sobald hier eine neue Version veröffentlicht ist.
+
+**Umstieg von der früheren HACS-Integration:** die Integration unter *Geräte & Dienste* löschen, in HACS
+entfernen und Home Assistant neu starten. Danach die App installieren und einmal bei Trade Republic anmelden.
+Die Entitäts-IDs sind gleich geblieben, Automationen laufen weiter. Die Lovelace-Karte
+`custom:saeulenwaechter-card` gibt es nicht mehr, die Oberfläche liegt jetzt in der Seitenleiste.
 
 ## Was angezeigt wird
-
-**Panel „Säulenwächter“ in der Seitenleiste** und die **Karte** `custom:saeulenwaechter-card`:
-
-```yaml
-type: custom:saeulenwaechter-card          # Übersicht aller drei Säulen + Ist/Soll
----
-type: custom:saeulenwaechter-card
-pillar: welt                               # Detailansicht: Hero, Position, Signale, Monatsstreifen, Säulen
-```
 
 **Depot erkennen (mit Login):** Die Positionen bei Trade Republic werden anhand der ISIN den Säulen zugeordnet.
 Gleichwertige Produkte zählen automatisch wie das Säulen-Instrument und lösen keinen Wechsel aus, z. B.
@@ -63,12 +56,13 @@ Hält eine Säule mehrere Produkte (z. B. zwei Welt-ETFs), ist der Balken je Pro
 | `sensor.saeulenwaechter_<säule>_wert`, `_ist_anteil` | Wert zum Geldkurs, Ist-% (Attribut Soll-%) |
 | `sensor.saeulenwaechter_<säule>_umschaltkurs`, `_kurs` | Monatsschluss, bei dem das Signal kippt; aktueller Kurs |
 | `binary_sensor.saeulenwaechter_<säule>_trend` / `_wuerde_kippen` | Trend an/aus; würde zum Monatsende kippen |
-| `sensor.saeulenwaechter_depotwert`, `_drift`, `_naechste_pruefung`, `_euro_zins`, `_dollar`, `_modus` | Übersicht |
+| `sensor.saeulenwaechter_depotwert`, `_gewinn_verlust`, `_drift`, `_naechste_pruefung`, `_euro_zins`, `_dollar`, `_modus` | Übersicht |
 | `binary_sensor.saeulenwaechter_rezession_{unemployment,claims,yield_curve}` | Rezessionszeichen |
-| `binary_sensor.saeulenwaechter_angleichung_faellig`, `_trade_republic` | Drift ≥ 5 Pp; Login-Status |
-| `button.saeulenwaechter_{aktualisieren,angleichen,testnachricht}` | Aktionen |
+| `binary_sensor.saeulenwaechter_angleichung_faellig`, `_handlung_noetig`, `_trade_republic` | Drift ≥ 5 Pp; Depot weicht ab (Attribut: Anweisungen); Login-Status |
 
-Services: `saeulenwaechter.refresh`, `saeulenwaechter.apply_rebalance`, `saeulenwaechter.send_test_message`.
+Die App schreibt die Entitäten über die Home-Assistant-API und erneuert sie jede Minute (nach einem Neustart von
+Home Assistant sind sie spätestens nach einer Minute wieder da). Aktualisieren, Angleichen und die
+WhatsApp-Testnachricht gibt es als Knöpfe in der Oberfläche.
 
 ## Wann kommt eine WhatsApp?
 
@@ -80,7 +74,7 @@ Services: `saeulenwaechter.refresh`, `saeulenwaechter.apply_rebalance`, `saeulen
 | Signal würde zum Monatsende kippen (letzte 7 Tage) | „👀 Welt: Trend würde kippen – heute 10,10 € unter Umschaltkurs 10,17 €“ |
 | Rezessionszeichen wechselt | „⚠️ US-Erstanträge warnt jetzt …“ |
 | Angleichen fällig (≥ 5 Pp) bzw. jährlich (Monat einstellbar) | „⚖️ Welt 50.000 € → 40.000 € …“ |
-| Trade-Republic-Login abgelaufen | „🔑 bitte neu anmelden“ |
+| Trade-Republic-Login abgelaufen | „🔑 bitte in der Säulenwächter-App neu anmelden“ |
 
 Jede Erkenntnis wird genau einmal gemeldet; mehrere gleichzeitige werden zu einer Nachricht zusammengefasst.
 
@@ -110,13 +104,19 @@ Wirtschaftsdaten werden einmal täglich geladen, bei Fehlern nach 2 h neu versuc
 
 ## Entwicklung
 
-```bash
-./scripts/build.sh                # baut dist/saeulenwaechter.zip
+```text
+repository.yaml            App-Repository für Home Assistant
+saeulenwaechter/           die App: config.yaml, build.yaml, Dockerfile, DOCS.md, CHANGELOG.md
+saeulenwaechter/app/       Python-Dienst: engine.py (Logik), web.py (Ingress-Oberfläche), ha.py (Entitäten)
+tests/                     Tests ohne Home Assistant
 ```
 
-Ein neues Release (`gh release create vX.Y.Z`) baut das ZIP per GitHub Action automatisch und hängt es an.
-
 ```bash
-python -m pytest tests            # reine Strategie-Logik (ohne HA)
-python -m pytest tests_ha         # Integrationstests in Home Assistant (pytest-homeassistant-custom-component)
+pip install -r saeulenwaechter/requirements.txt pytest pytest-asyncio pytest-aiohttp
+python -m pytest tests
+# lokal starten (ohne Home Assistant, Daten in ./data, Oberfläche auf http://127.0.0.1:8099)
+cd saeulenwaechter && SW_DATA_DIR=../data SW_ALLOW_ALL=1 python -m app
 ```
+
+Neue Version: `version` in `saeulenwaechter/config.yaml` und `VERSION` in `app/const.py` erhöhen, Eintrag in
+`CHANGELOG.md`, nach `main` mergen. Home Assistant bietet das Update dann an.
