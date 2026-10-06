@@ -1,6 +1,7 @@
-# Säulenwächter – Home-Assistant-App. BUILD_FROM kommt aus build.yaml (python:3.12-slim je Architektur).
-ARG BUILD_FROM=python:3.12-slim
-FROM ${BUILD_FROM}
+# Säulenwächter – Home-Assistant-App.
+# Das Basisimage steht bewusst fest hier (nicht über BUILD_FROM): das Standard-Image des Supervisors
+# (ghcr.io/home-assistant/base) enthält kein Python. Die Plattform (amd64/aarch64) wählt der Supervisor per --platform.
+FROM docker.io/library/python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

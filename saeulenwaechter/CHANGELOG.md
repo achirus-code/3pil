@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.1
+
+- Installation schlug fehl („pip: not found“): Der Supervisor hat `build.yaml` verworfen und mit seinem
+  Standard-Image ohne Python gebaut. Das Basisimage steht jetzt fest im Dockerfile, `build.yaml` entfällt.
+
 ## 2.0.0
 
 - Der Säulenwächter ist jetzt eine **Home-Assistant-App** statt einer HACS-Integration. Updates kommen über den

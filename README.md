@@ -106,7 +106,7 @@ Wirtschaftsdaten werden einmal täglich geladen, bei Fehlern nach 2 h neu versuc
 
 ```text
 repository.yaml            App-Repository für Home Assistant
-saeulenwaechter/           die App: config.yaml, build.yaml, Dockerfile, DOCS.md, CHANGELOG.md
+saeulenwaechter/           die App: config.yaml, Dockerfile, DOCS.md, CHANGELOG.md
 saeulenwaechter/app/       Python-Dienst: engine.py (Logik), web.py (Ingress-Oberfläche), ha.py (Entitäten)
 tests/                     Tests ohne Home Assistant
 ```
