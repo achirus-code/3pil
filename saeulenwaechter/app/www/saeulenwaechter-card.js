@@ -98,6 +98,13 @@ const STYLE = `
                         100% { box-shadow:0 0 0 0 rgba(255,59,48,0); } }
   @media (prefers-reduced-motion: reduce) { .alarm { animation:none; } }
   svg.hist { width:100%; height:110px; display:block; margin-top:4px; }
+  .periods { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin:6px 0; }
+  .period { display:flex; flex-direction:column; align-items:flex-start; gap:1px; padding:6px 10px; border-radius:8px; cursor:pointer;
+            border:1px solid var(--divider-color); background:transparent; color:var(--primary-text-color); font:inherit; text-align:left; }
+  .period.on { border-color:var(--primary-color); background:rgba(127,127,127,.1); }
+  .period .k { font-size:11px; color:var(--secondary-text-color); }
+  .period .num { font-size:15px; font-weight:600; }
+  .period .small { font-size:11px; font-weight:500; }
   .hist-legend { display:flex; justify-content:space-between; font-size:11px; color:var(--secondary-text-color); margin-top:2px; }
   .stat-top { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; margin:2px 0 8px; }
   .stat-top .k { font-size:11px; color:var(--secondary-text-color); }
@@ -361,8 +368,54 @@ class SaeulenBase extends HTMLElement {
       ${this.interestLine(st.interest)}
       ${this.reconcileLine(d.reconcile)}
       <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
-      ${this.history(d)}
+      ${this.performance(d)}
     </div>`;
+  }
+
+  performance(d) {
+    const perf = d.performance;
+    if (!perf || !perf.series || perf.series.length < 2) return this.history(d);
+    const sel = this._period || "1M";
+    const signed = (v) => v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
+    const col = (v) => v == null || Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
+    const chips = ["1M", "6M", "1J"].map((k) => {
+      const p = perf.periods[k];
+      const label = { "1M": "1 Monat", "6M": "6 Monate", "1J": "1 Jahr" }[k];
+      return `<button class="period${k === sel ? " on" : ""}" data-period="${k}">
+        <span class="k">${label}</span>
+        <span class="num" style="color:${col(p && p.gain)}">${p ? signed(p.gain) : "–"}</span>
+        <span class="num small" style="color:${col(p && p.gain)}">${p && p.pct != null ? pct(p.pct) : ""}</span></button>`;
+    }).join("");
+    const from = (perf.periods[sel] || {}).from || perf.series[0][0];
+    const h = perf.series.filter(([day]) => day >= from).map(([date, value]) => ({ date, value }));
+    return `<div class="label" style="margin-top:12px">Entwicklung der heutigen Bestände</div>
+      <div class="periods">${chips}</div>
+      ${h.length >= 2 ? this.chart(h) : ""}
+      <div class="note">Mit den heutigen Stückzahlen und Tagesschlusskursen gerechnet, Cash mit heutigem Betrag (ohne Zinsen) – zeigt, was die jetzigen Positionen im Zeitraum gewonnen oder verloren haben, nicht das Ergebnis früherer Käufe und Verkäufe.</div>`;
+  }
+
+  chart(h) {
+    const W = 400, H = 110, P = 4;
+    const vals = h.map((x) => x.value);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (hi - lo < 1) { lo -= 1; hi += 1; }
+    const x = (i) => P + (i / (h.length - 1)) * (W - 2 * P);
+    const y = (v) => P + (1 - (v - lo) / (hi - lo)) * (H - 2 * P);
+    const line = h.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join("");
+    const area = `${line}L${x(h.length - 1).toFixed(1)},${H - P}L${x(0).toFixed(1)},${H - P}Z`;
+    const first = h[0], last = h[h.length - 1];
+    const change = last.value - first.value;
+    const c = change >= 0 ? "var(--sw-green)" : "var(--sw-red)";
+    const dates = (p) => new Date(p.date).toLocaleDateString("de-DE");
+    const step = Math.max(1, Math.floor(h.length / 60));
+    return `<svg class="hist" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+           aria-label="Wert von ${eur(first.value, 0)} auf ${eur(last.value, 0)}">
+        <path d="${area}" fill="${c}" opacity=".12"/>
+        <path d="${line}" fill="none" stroke="${c}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+        ${h.filter((_, i) => i % step === 0 || i === h.length - 1).map((p) => { const i = h.indexOf(p); return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="5" fill="transparent"><title>${dates(p)}: ${eur(p.value, 0)}</title></circle>`; }).join("")}
+      </svg>
+      <div class="hist-legend num"><span>${dates(first)} – ${dates(last)} · Tief ${eur(Math.min(...vals), 0)} · Hoch ${eur(Math.max(...vals), 0)}</span>
+        <span style="color:${c}">${change >= 0 ? "+" : "−"}${eur(Math.abs(change), 0)} (${pct(change / first.value)})</span></div>`;
   }
 
   history(d) {
@@ -461,6 +514,8 @@ Soll eine Position mitzählen: ISIN in den Optionen unter „Weitere ISINs …�
   bind() {
     this.shadowRoot.querySelectorAll("[data-action]").forEach((b) =>
       b.addEventListener("click", (e) => { e.stopPropagation(); this._action(b.dataset.action); }));
+    this.shadowRoot.querySelectorAll("[data-period]").forEach((b) =>
+      b.addEventListener("click", (e) => { e.stopPropagation(); this._period = b.dataset.period; this._render(); }));
     this.shadowRoot.querySelectorAll("[data-since]").forEach((b) =>
       b.addEventListener("click", (e) => {
         e.stopPropagation();
