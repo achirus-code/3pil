@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.7.0
+
+- Statistik: Entwicklung der heutigen Bestände über 1 Monat, 6 Monate und 1 Jahr (Gewinn in € und %) mit umschaltbarer Grafik aus Tagesschlusskursen. Junge Produkte ohne lange Kurshistorie werden mit dem gleichwertigen Säulen-Instrument fortgeschrieben.
+
 ## 2.6.0
 
 - Benachrichtigungen auch über einen Dienst in Home Assistant (Optionen „Benachrichtigungsdienst“ und „Empfänger“), z. B. whatsapp.send_message von „WhatsApp for Home Assistant“, die Home-Assistant-App oder Telegram – zusätzlich zu oder statt CallMeBot.

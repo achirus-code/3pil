@@ -530,3 +530,17 @@ async def test_ha_service_notification(aiohttp_client):
     assert await send_ha_service(client.session, "notify.mobile_app_handy", None, "Hallo", "t", url)
     assert calls[-1][3] == {"message": "Hallo", "title": "Säulenwächter"}
     assert not await send_ha_service(client.session, "kaputt", None, "x", "t", url)
+
+
+async def test_performance_periods_and_series(make_engine, market):
+    eng = await make_engine()
+    d = await eng.refresh()
+    perf = d["performance"]
+    assert set(perf["periods"]) == {"1M", "6M", "1J"}
+    one = perf["periods"]["1M"]
+    assert one["from"] == "2026-09-06" and isinstance(one["gain"], float)
+    # Gewinn = heutiger Wert der Positionen − Wert mit den Kursen vor einem Monat
+    welt = d["pillars"]["welt"]["held"][0]
+    assert set(one["pillars"]) <= {"welt", "gold", "anleihen"} and "welt" in one["pillars"]
+    assert perf["series"][-1] == ["2026-10-06", pytest.approx(d["stats"]["total"]["value"], abs=1)]
+    assert perf["series"][0][0] >= "2025-10-05" and welt["value"] > 0
