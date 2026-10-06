@@ -319,7 +319,11 @@ class TradeRepublic:
             isin = _isin_from_icon(it.get("icon"))
             if not isin or (isins is not None and isin not in isins):
                 continue
-            if str(it.get("status") or "").upper() in ("CANCELED", "CANCELLED", "FAILED", "PENDING"):
+            if str(it.get("status") or "").upper() in ("CANCELED", "CANCELLED", "FAILED", "PENDING", "REJECTED"):
+                continue
+            # Dividenden, Ausschüttungen, Zinsen, Steuern sind keine Käufe/Verkäufe (tragen aber dieselbe ISIN)
+            label = f"{it.get('subtitle') or ''} {it.get('eventType') or it.get('type') or ''}".lower()
+            if it.get("dividend") or any(w in label for w in NOT_TRADES):
                 continue
             try:
                 when = datetime.fromisoformat(str(it["timestamp"]).replace("Z", "+00:00"))
@@ -328,7 +332,8 @@ class TradeRepublic:
             trades.append({"id": it.get("id"), "isin": isin, "time": when.isoformat(),
                            "date": when.date().isoformat(),
                            "amount": _f(_amount(it.get("amount"))), "title": it.get("title"),
-                           "subtitle": it.get("subtitle"), "shares": None})
+                           "subtitle": it.get("subtitle"), "type": it.get("eventType") or it.get("type"),
+                           "shares": None})
         # Stückzahlen aus den Details, in Paketen
         for i in range(0, len(trades), 20):
             chunk = trades[i:i + 20]
@@ -338,11 +343,21 @@ class TradeRepublic:
                     raise detail
                 if isinstance(detail, Exception):
                     continue
+                if any(w in json.dumps(detail, ensure_ascii=False).lower() for w in ("dividende", "ausschüttung")):
+                    t["skip"] = True
+                    continue
                 shares = find_shares(detail)
                 if shares is not None:
-                    sell = (t["amount"] or 0) > 0 or "verkauf" in str(t["subtitle"] or "").lower() \
-                        or "sell" in str(t["subtitle"] or "").lower()
+                    text = f"{t['subtitle'] or ''} {t['type'] or ''}".lower()
+                    sell = "verkauf" in text or "sell" in text
                     t["shares"] = -abs(shares) if sell else abs(shares)
+                    if t["amount"] is not None:  # Vorzeichen wie bei TR: Kauf = Geld raus (−), Verkauf = Geld rein (+)
+                        t["amount"] = abs(t["amount"]) if sell else -abs(t["amount"])
+        # nur echte Käufe/Verkäufe mit Stückzahl – ohne Stückzahl lässt sich nichts sicher zuordnen
+        trades = [t for t in trades if t["shares"] and not t.pop("skip", False)]
+        for t in trades:
+            _LOGGER.info("TR-Transaktion %s %s: %s %s Stück, %s €", t["date"], t["isin"], t["subtitle"] or t["type"],
+                         t["shares"], t["amount"])
         return trades
 
     async def logout(self) -> None:
@@ -530,6 +545,8 @@ class TradeRepublic:
 
 
 ICON_ISIN = re.compile(r"([A-Z]{2}[A-Z0-9]{9}[0-9])")
+NOT_TRADES = ("dividend", "ausschüttung", "ausschuettung", "zinsen", "interest", "steuer", "tax", "coupon", "kupon",
+              "ertrag", "distribution", "corporate_action", "kapitalmaßnahme")
 SHARE_TITLES = ("aktien", "anteile", "stück", "stueck", "shares", "anzahl", "menge")
 
 

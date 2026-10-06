@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.9.1
+
+- Historie korrigiert: Dividenden, Ausschüttungen, Zinsen und Steuerbuchungen aus der Zeitleiste zählen nicht mehr als Verkäufe (sie verfälschten die Stückzahlen in der Vergangenheit). Nur Einträge mit Stückzahl gelten als Kauf/Verkauf; die Richtung kommt aus der Art der Buchung.
+- Transaktionen werden bei jedem Abgleich komplett neu gelesen; frühere Fehldeutungen verschwinden.
+- Je Position aufklappbar: die erkannten Käufe/Verkäufe (Datum, Art, Stück, Betrag) zum Nachprüfen; im Log je Transaktion eine Zeile.
+
 ## 2.9.0
 
 - Statistik: Zeiträume 1 Woche, 1/3/6 Monate, seit 1.1., 1/3/5 Jahre und Max., jeweils mit Gewinn je Säule.

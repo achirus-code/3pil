@@ -179,7 +179,16 @@ async def test_transactions_from_timeline():
             {"id": "t2", "timestamp": "2026-08-01T08:00:00.000+0000", "title": "Apple", "icon": "logos/US0378331005/v2",
              "amount": {"value": -100.0}},
             {"id": "t3", "timestamp": "2026-07-10T08:00:00.000+0000", "title": "SPDR", "subtitle": "Verkaufsorder",
-             "icon": "logos/IE00B3YLTY66/v2", "amount": {"value": 1200.5}}],
+             "icon": "logos/IE00B3YLTY66/v2", "amount": {"value": 1200.5}},
+            # Ausschüttungen tragen dieselbe ISIN und in den Details die Stückzahl – sind aber keine Verkäufe
+            {"id": "d1", "timestamp": "2026-06-15T08:00:00.000+0000", "title": "SPDR", "subtitle": "Ausschüttung",
+             "icon": "logos/IE00B3YLTY66/v2", "amount": {"value": 12.3}},
+            {"id": "d2", "timestamp": "2026-05-15T08:00:00.000+0000", "title": "SPDR", "subtitle": "",
+             "icon": "logos/IE00B3YLTY66/v2", "amount": {"value": 9.1}, "dividend": True},
+            {"id": "d3", "timestamp": "2026-04-15T08:00:00.000+0000", "title": "SPDR", "subtitle": "Gutschrift",
+             "icon": "logos/IE00B3YLTY66/v2", "amount": {"value": 7.0}},
+            {"id": "n1", "timestamp": "2026-04-01T08:00:00.000+0000", "title": "SPDR", "subtitle": "Kauforder",
+             "icon": "logos/IE00B3YLTY66/v2", "amount": {"value": -50.0}}],
             "cursors": {"after": "c2"}},
         "c2": {"items": [{"id": "t4", "timestamp": "2026-03-02T10:00:00.000+0000", "title": "SPDR",
                           "subtitle": "Kauforder", "icon": "logos/IE00B3YLTY66/v2", "status": "CANCELED",
@@ -188,7 +197,9 @@ async def test_transactions_from_timeline():
     details = {"t1": {"sections": [{"title": "Transaktion", "data": [
                    {"title": "Anteile", "detail": {"text": "38,123456"}},
                    {"title": "Aktienkurs", "detail": {"text": "11,80 €"}}]}]},
-               "t3": {"sections": [{"data": [{"title": "Aktien", "detail": {"text": "100"}}]}]}}
+               "t3": {"sections": [{"data": [{"title": "Aktien", "detail": {"text": "100"}}]}]},
+               "d1": {"sections": [{"data": [{"title": "Aktien", "detail": {"text": "38"}}]}]},
+               "d3": {"sections": [{"title": "Dividende", "data": [{"title": "Aktien", "detail": {"text": "38"}}]}]}}
 
     def answer(payloads):
         out = []

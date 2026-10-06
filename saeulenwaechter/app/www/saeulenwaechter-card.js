@@ -85,6 +85,11 @@ const STYLE = `
   .interest { margin-top:10px; padding:8px 10px; border-radius:8px; background:var(--secondary-background-color, rgba(127,127,127,.12)); font-size:13px; }
   .interest .muted { opacity:.7; }
   .muted { color:var(--secondary-text-color); font-weight:normal; }
+  details.trades { font-size:12px; }
+  details.trades summary { cursor:pointer; color:var(--primary-color); }
+  details.trades table { width:100%; border-collapse:collapse; margin-top:4px; }
+  details.trades td { padding:3px 4px; border-top:1px solid var(--divider-color); white-space:nowrap; }
+  details.trades td.num { text-align:right; }
   .since-edit { font-size:11px; color:var(--primary-color); }
   .alarm-table { width:100%; margin-top:8px; border-collapse:collapse; font-size:14px; }
   .alarm-table th { text-align:left; font-size:11px; text-transform:uppercase; opacity:.85; padding:4px 6px; }
@@ -253,8 +258,17 @@ class SaeulenBase extends HTMLElement {
       </div>`;
   }
 
-  position(p) {
+  position(p, d) {
     if (!p.held || !p.held.length) return "";
+    const trades = (d && d.trades) || [];
+    const tradeList = (isin) => {
+      const ts = trades.filter((t) => t.isin === isin).slice().reverse();
+      if (!ts.length) return "";
+      return `<details class="trades"><summary>${ts.length} Käufe/Verkäufe laut Trade Republic</summary><table>
+        ${ts.map((t) => `<tr><td>${new Date(t.date).toLocaleDateString("de-DE")}</td><td>${t.shares >= 0 ? "Kauf" : "Verkauf"}${t.subtitle ? ` <span class="muted">${esc(t.subtitle)}</span>` : ""}</td>
+          <td class="num">${(t.shares >= 0 ? "+" : "−") + Math.abs(t.shares).toLocaleString("de-DE", { maximumFractionDigits: 4 })}</td>
+          <td class="num">${t.amount != null ? eur(Math.abs(t.amount), 2) : "–"}</td></tr>`).join("")}</table></details>`;
+    };
     return `<div class="section"><div class="label">Offene Position</div>${p.held.map((h) => {
       const res = h.value != null && h.cost ? h.value / h.cost - 1 : null;
       return `<div class="grid num">
@@ -265,6 +279,7 @@ class SaeulenBase extends HTMLElement {
         <div class="kv"><div class="k">Wert (Geldkurs)</div><div class="v">${eur(h.value, 0)}</div></div>
         <div class="kv"><div class="k">Ergebnis</div><div class="v" style="color:${res == null || Math.abs(res) < 0.0005 ? "inherit" : res > 0 ? "var(--sw-green)" : "var(--sw-red)"}">${pct(res)}</div></div>
         <div class="kv"><div class="k">Gehalten</div><div class="v">${heldFor(h.since)}${h.since ? `<div class="s" style="font-size:11px;color:var(--secondary-text-color)">${h.since_manual || h.physical || !h.isin || h.isin === "PHYSISCH" ? "gekauft" : "erster Abgleich"} ${new Date(h.since).toLocaleDateString("de-DE")}</div>` : ""}${!h.physical && h.isin && h.isin !== "PHYSISCH" && h.since !== undefined && h.counts_as !== undefined ? `<a href="#" class="since-edit" data-since="${esc(h.isin)}" data-date="${esc(h.since || "")}">ändern</a>` : ""}</div></div>
+        ${tradeList(h.isin) ? `<div class="kv" style="grid-column:1/-1">${tradeList(h.isin)}</div>` : ""}
         ${h.share && h.share < 1 ? `<div class="kv"><div class="k">Anteil am Bestand</div><div class="v">${pct(h.share, 0, false)}</div></div>` : ""}
       </div>`;
     }).join("")}</div>`;
@@ -659,7 +674,7 @@ class SaeulenwaechterCard extends SaeulenBase {
       body = `<div class="section note">Lade …</div>`;
     } else if (cfg.pillar && d.pillars[cfg.pillar]) {
       const p = d.pillars[cfg.pillar];
-      body = this.alert(d, p.key) + this.hero(p, d) + this.position(p) + this.signals(p) + this.pillars(d, p.key);
+      body = this.alert(d, p.key) + this.hero(p, d) + this.position(p, d) + this.signals(p) + this.pillars(d, p.key);
     } else {
       body = this.alert(d) + this.stats(d) + `<div class="section"><div class="label">${esc(cfg.title || "Säulenwächter")} · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
         ${this.overviewRows(d, false)}</div>` + this.pillars(d, null);
@@ -718,7 +733,7 @@ class SaeulenwaechterPanel extends SaeulenBase {
           </div>
           <div>
             <div class="buttons" style="margin-bottom:12px">${tabs}</div>
-            <ha-card>${this.hero(p, d)}${this.position(p)}${this.signals(p)}</ha-card>
+            <ha-card>${this.hero(p, d)}${this.position(p, d)}${this.signals(p)}</ha-card>
           </div>
         </div>`;
     }

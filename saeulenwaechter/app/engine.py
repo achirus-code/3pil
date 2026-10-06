@@ -506,12 +506,8 @@ class Engine:
         self.state["sent"].pop("auth", None)
         try:  # Käufe und Verkäufe der gehaltenen Positionen (für Haltedauer und echten Verlauf)
             trades = await self.tr.transactions(isins=set(p["positions"]))
-            old = {t["id"]: t for t in self.state.get("trades", []) if t.get("id")}
-            for t in trades:
-                if t.get("id"):
-                    old[t["id"]] = {**old.get(t["id"], {}), **{k: v for k, v in t.items() if v is not None}}
-            self.state["trades"] = sorted((t for t in old.values() if t["isin"] in p["positions"]),
-                                          key=lambda t: t["time"])
+            # jedes Mal komplett neu (frühere Fehldeutungen, z. B. Dividenden, fallen so wieder heraus)
+            self.state["trades"] = sorted(trades, key=lambda t: t["time"])
             self.state["trades_at"] = self.now().isoformat()
         except TRAuthError:
             raise
@@ -815,6 +811,8 @@ class Engine:
             "tr_split": split,
             "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
             "performance": self._performance(holdings, mode, today),
+            "trades": [{k: t.get(k) for k in ("date", "isin", "subtitle", "shares", "amount")}
+                       for t in self.state.get("trades", [])] if mode == "depot" else [],
             "market_error": market.get("_error"),
             "macro_status": {k: {"ok_at": v.get("ok_at"), "error": v.get("error")}
                              for k, v in self.state["macro"].items()},
