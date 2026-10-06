@@ -13,6 +13,10 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install pytest-homeassistant-custom-component
+      - name: HA-Frontend passend zur installierten HA-Version
+        run: |
+          V=$(python -c "import json,homeassistant.components.frontend as f,pathlib;print([r for r in json.loads((pathlib.Path(f.__file__).parent/'manifest.json').read_text())['requirements'] if r.startswith('home-assistant-frontend')][0])")
+          pip install "$V"
       - run: python -m pytest tests tests_ha -q
   hassfest:
     runs-on: ubuntu-latest
