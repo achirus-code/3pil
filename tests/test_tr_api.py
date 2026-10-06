@@ -167,3 +167,39 @@ async def test_logout_closes_session():
     tr.cookies = {"tr_session": "s", "tr_refresh": "r"}
     await tr.logout()
     assert tr.cookies == {} and not tr.logged_in and calls[0][:2] == ("POST", "logout")
+
+
+
+async def test_transactions_from_timeline():
+    pages = {
+        None: {"items": [
+            {"id": "t1", "timestamp": "2026-09-21T08:01:02.000+0000", "title": "SPDR MSCI ACWI IMI",
+             "subtitle": "Sparplan ausgeführt", "icon": "logos/IE00B3YLTY66/v2", "status": "EXECUTED",
+             "amount": {"value": -450.0, "currency": "EUR"}},
+            {"id": "t2", "timestamp": "2026-08-01T08:00:00.000+0000", "title": "Apple", "icon": "logos/US0378331005/v2",
+             "amount": {"value": -100.0}},
+            {"id": "t3", "timestamp": "2026-07-10T08:00:00.000+0000", "title": "SPDR", "subtitle": "Verkaufsorder",
+             "icon": "logos/IE00B3YLTY66/v2", "amount": {"value": 1200.5}}],
+            "cursors": {"after": "c2"}},
+        "c2": {"items": [{"id": "t4", "timestamp": "2026-03-02T10:00:00.000+0000", "title": "SPDR",
+                          "subtitle": "Kauforder", "icon": "logos/IE00B3YLTY66/v2", "status": "CANCELED",
+                          "amount": {"value": -600.0}}], "cursors": {}},
+    }
+    details = {"t1": {"sections": [{"title": "Transaktion", "data": [
+                   {"title": "Anteile", "detail": {"text": "38,123456"}},
+                   {"title": "Aktienkurs", "detail": {"text": "11,80 €"}}]}]},
+               "t3": {"sections": [{"data": [{"title": "Aktien", "detail": {"text": "100"}}]}]}}
+
+    def answer(payloads):
+        out = []
+        for p in payloads:
+            if p["type"] == "timelineTransactions":
+                out.append(pages[p.get("after")])
+            else:
+                out.append(details.get(p["id"], {}))
+        return out
+
+    tr = client(answer)
+    trades = await tr.transactions(isins={"IE00B3YLTY66"})
+    assert [(t["id"], t["date"], t["amount"], t["shares"]) for t in trades] == [
+        ("t1", "2026-09-21", -450.0, pytest.approx(38.123456)), ("t3", "2026-07-10", 1200.5, -100.0)]

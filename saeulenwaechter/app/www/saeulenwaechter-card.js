@@ -115,6 +115,10 @@ const STYLE = `
   .chart-wrap .tip { position:absolute; top:4px; min-width:210px; padding:8px 10px; border-radius:8px; font-size:12px;
                      background:var(--card-background-color, #1c1c1e); border:1px solid var(--divider-color); box-shadow:0 4px 16px rgba(0,0,0,.35); pointer-events:none; z-index:2; }
   .chart-wrap .tip .row { display:flex; justify-content:space-between; gap:12px; margin-top:3px; }
+  .chart-wrap .mark { position:absolute; bottom:18px; transform:translateX(-50%); font-size:9px; pointer-events:none; line-height:1; }
+  .chart-wrap .mark.buy { color:var(--sw-green); }
+  .chart-wrap .mark.sell { color:var(--sw-red); }
+  .chart-wrap .tip .ev { color:var(--secondary-text-color); border-top:1px solid var(--divider-color); padding-top:3px; }
   .chart-wrap .tip i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; }
   .period { display:flex; flex-direction:column; align-items:flex-start; gap:1px; padding:6px 10px; border-radius:8px; cursor:pointer;
             border:1px solid var(--divider-color); background:transparent; color:var(--primary-text-color); font:inherit; text-align:left; }
@@ -407,19 +411,27 @@ class SaeulenBase extends HTMLElement {
         <span class="num small" style="color:${col(p && p.gain)}">${p && p.pct != null ? pct(p.pct) : ""}</span></button>`;
     }).join("");
     const cur = perf.periods[sel];
-    const rows = perf.series.filter((r) => r[0] >= cur.from);
+    const i0 = Math.max(0, perf.series.findIndex((r) => r[0] >= cur.from));
+    const rows = perf.series.slice(i0);
+    const flows = (perf.flows || []).slice(i0);
     const names = Object.fromEntries(Object.values(d.pillars).map((p) => [p.key, p]));
-    this._chart = { rows, keys: perf.keys, names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
+    this._chart = { rows, flows, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
                     colors: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).color || "#888"])) };
     const split = perf.keys.map((k) => {
       const v = cur.pillars[k];
       return `<span><i style="background:${esc(this._chart.colors[k])}"></i>${esc(this._chart.names[k])} <b class="num" style="color:${col(v)}">${signed(v)}</b></span>`;
     }).join("");
-    return `<div class="label" style="margin-top:12px">Entwicklung der heutigen Bestände</div>
+    const inv = cur.invested ? ` · im Zeitraum investiert <b class="num">${signed(cur.invested)}</b> (zählt nicht als Gewinn)` : "";
+    const src = perf.history
+      ? "Stückzahlen je Tag aus deinen Käufen und Verkäufen bei Trade Republic"
+      : d.mode === "depot"
+        ? "<b>Ohne Kaufhistorie</b> – mit den heutigen Stückzahlen gerechnet. Einmal „Neu synchronisieren“, dann liest die App deine Käufe und Verkäufe"
+        : "Papierdepot ab Einstieg";
+    return `<div class="label" style="margin-top:12px">Wertentwicklung der Wertpapiere</div>
       <div class="periods">${chips}</div>
-      <div class="parts" style="margin:2px 0 4px">${split}</div>
+      <div class="parts" style="margin:2px 0 4px">${split}${inv ? `<span>${inv}</span>` : ""}</div>
       ${this.chart(rows)}
-      <div class="note">Mit den heutigen Stückzahlen und Tagesschlusskursen gerechnet, Cash mit heutigem Betrag (ohne Zinsen) – zeigt, was die jetzigen Positionen im Zeitraum gewonnen oder verloren haben, nicht das Ergebnis früherer Käufe und Verkäufe. Mit der Maus oder dem Finger über die Grafik fahren für Einzelwerte.</div>`;
+      <div class="note">${src}. Gewinn = Wertänderung ohne neu investiertes Geld; Cash ist nicht enthalten. ▲ Kauf, ▼ Verkauf – mit der Maus oder dem Finger über die Grafik fahren für Einzelwerte.</div>`;
   }
 
   chart(rows) {
@@ -432,8 +444,8 @@ class SaeulenBase extends HTMLElement {
     const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
     const line = rows.map((r, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(r[1]).toFixed(1)}`).join("");
     const area = `${line}L${x(rows.length - 1).toFixed(1)},${H - B}L${x(0).toFixed(1)},${H - B}Z`;
-    const change = rows[rows.length - 1][1] - rows[0][1];
-    const c = change >= 0 ? "var(--sw-green)" : "var(--sw-red)";
+    const gainNow = this._chart && this._chart.cur ? this._chart.cur.gain : rows[rows.length - 1][1] - rows[0][1];
+    const c = gainNow >= 0 ? "var(--sw-green)" : "var(--sw-red)";
     const fmtD = (iso, long) => new Date(iso).toLocaleDateString("de-DE", long ? { day: "numeric", month: "short", year: "numeric" } : { month: "short", year: "2-digit" });
     // drei Hilfslinien mit Werten und vier Datumsmarken
     const grid = [0, 0.5, 1].map((f) => { const v = lo + pad + f * (hi - lo - 2 * pad); return `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/>`; }).join("");
@@ -447,19 +459,30 @@ class SaeulenBase extends HTMLElement {
         <path d="${line}" fill="none" stroke="${c}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
         <line class="cross" x1="0" x2="0" y1="${T}" y2="${H - B}" style="display:none"/>
       </svg>
+      ${(() => {
+        const ev = (this._chart && this._chart.events) || [];
+        const byDay = {};
+        for (const e of ev) byDay[e.date] = (byDay[e.date] || 0) + e.amount;
+        return Object.entries(byDay).map(([day, amt]) => {
+          let i = rows.findIndex((r) => r[0] >= day);
+          if (i < 0) i = rows.length - 1;
+          return `<span class="mark ${amt >= 0 ? "buy" : "sell"}" style="left:${(x(i) / W * 100).toFixed(2)}%">${amt >= 0 ? "▲" : "▼"}</span>`;
+        }).join("");
+      })()}
       <div class="dot" style="display:none;border-color:${c}"></div>
       <div class="ylabels num">${gridLabels}</div>
       <div class="xlabels num">${ticks}</div>
       <div class="tip" style="display:none"></div>
     </div>
     <div class="hist-legend num"><span>${fmtD(rows[0][0], true)} – ${fmtD(rows[rows.length - 1][0], true)} · Tief ${eur(Math.min(...vals), 0)} · Hoch ${eur(Math.max(...vals), 0)}</span>
-      <span style="color:${c}">${change >= 0 ? "+" : "−"}${eur(Math.abs(change), 0)} (${pct(change / rows[0][1])})</span></div>`;
+      ${(() => { const cur = this._chart && this._chart.cur; if (!cur) return ""; const g = cur.gain;
+        return `<span style="color:${g >= 0 ? "var(--sw-green)" : "var(--sw-red)"}">Gewinn ${g >= 0 ? "+" : "−"}${eur(Math.abs(g), 0)}${cur.pct != null ? ` (${pct(cur.pct)})` : ""}</span>`; })()}</div>`;
   }
 
   _bindChart() {
     const wrap = this.shadowRoot.querySelector(".chart-wrap");
     if (!wrap || !this._chart) return;
-    const { rows, keys, names, colors } = this._chart;
+    const { rows, flows, keys, names, colors, events } = this._chart;
     const svg = wrap.querySelector("svg"), tip = wrap.querySelector(".tip"), cross = wrap.querySelector(".cross"),
           dot = wrap.querySelector(".dot");
     const [, , W, H] = svg.getAttribute("viewBox").split(" ").map(Number);
@@ -482,8 +505,12 @@ class SaeulenBase extends HTMLElement {
       const colr = (v) => Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
       tip.innerHTML = `<b>${new Date(r[0]).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" })}</b>
         <div class="row"><span>Gesamt</span><b class="num">${eur(r[1], 0)}</b></div>
-        <div class="row"><span>seit ${new Date(first[0]).toLocaleDateString("de-DE")}</span><b class="num" style="color:${colr(ch)}">${sign(ch)} · ${pct(first[1] ? ch / first[1] : 0)}</b></div>
-        ${keys.map((k, j) => { const d = r[2 + j] - first[2 + j]; return `<div class="row"><span><i style="background:${esc(colors[k])}"></i>${esc(names[k])}</span><span class="num">${eur(r[2 + j], 0)} <span style="color:${colr(d)}">${sign(d)}</span></span></div>`; }).join("")}`;
+        ${(() => { const inv = (flows || []).slice(1, i + 1).reduce((a, f) => a + f[0], 0); const g = ch - inv;
+          return `<div class="row"><span>Gewinn seit ${new Date(first[0]).toLocaleDateString("de-DE")}</span><b class="num" style="color:${colr(g)}">${sign(g)}</b></div>`
+            + (Math.abs(inv) >= 1 ? `<div class="row"><span>investiert seitdem</span><span class="num">${sign(inv)}</span></div>` : ""); })()}
+        ${keys.map((k, j) => `<div class="row"><span><i style="background:${esc(colors[k])}"></i>${esc(names[k])}</span><span class="num">${eur(r[2 + j], 0)}</span></div>`).join("")}
+        ${(events || []).filter((e) => e.date === r[0] || (i > 0 && e.date > rows[i - 1][0] && e.date <= r[0])).map((e) =>
+          `<div class="row ev"><span>${e.amount >= 0 ? "▲ Kauf" : "▼ Verkauf"} ${esc(e.name)}</span><span class="num">${eur(Math.abs(e.amount), 0)}${e.shares ? ` · ${Math.abs(e.shares).toLocaleString("de-DE", { maximumFractionDigits: 3 })} St.` : ""}</span></div>`).join("")}`;
       tip.style.display = "";
       // neben den Cursor, auf der Seite mit mehr Platz
       const left = px / W * box.width;
