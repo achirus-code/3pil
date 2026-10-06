@@ -31,3 +31,6 @@ configuration:
   bls_key:
     name: BLS-API-Key (optional)
     description: Für mehr Abrufe der US-Arbeitslosenquote.
+  cash_zins:
+    name: Zinssatz auf Cash in % (optional)
+    description: Leer lassen, dann gilt der Zinssatz, den Trade Republic beim Abgleich meldet. Ein eigener Wert (z. B. 2,0) hat Vorrang.

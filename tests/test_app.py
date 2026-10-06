@@ -111,6 +111,40 @@ async def test_paper_decision_messages_and_state_file(make_engine, sent, tmp_pat
     assert [h["month"] for h in eng2.data["pillars"]["welt"]["history"]] == ["2026-10", "2026-11"]
 
 
+async def test_paper_cash_earns_interest(make_engine):
+    eng = await make_engine({"cash_zins": "2,0"})
+    d = await eng.refresh()
+    assert d["stats"]["interest"]["rate"] == pytest.approx(0.02)
+    assert d["stats"]["interest"]["source"] == "option"
+    start = d["pillars"]["anleihen"]["value"]
+    assert d["stats"]["interest"]["per_year"] == pytest.approx(start * 0.02, abs=0.01)
+    eng.clock = eng.clock.replace(day=20)  # 14 Tage später, Anleihen weiter in Cash
+    d = await eng.refresh()
+    expect = start * (1.02 ** (14 / 365) - 1)
+    assert d["pillars"]["anleihen"]["value"] == pytest.approx(start + expect, abs=0.01)
+    assert d["stats"]["interest"]["earned"] == pytest.approx(expect, abs=0.01)
+    assert d["pillars"]["welt"]["value"] != pytest.approx(d["pillars"]["welt"]["amount"])  # investiert: keine Zinsen
+    assert eng.state["pillars"]["welt"].get("interest_earned") is None
+
+
+async def test_depot_interest_from_trade_republic(make_engine, monkeypatch):
+    async def portfolio(self):
+        return {"positions": {"IE00B3YLTY66": {"size": 3350.0, "avg_buy": 11.0}}, "cash": 10000.0}
+
+    async def interest(self):
+        return 0.0175
+
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    monkeypatch.setattr(TradeRepublic, "interest", interest)
+    eng = await make_engine()
+    eng.tr.cookies = {"tr_session": "s"}
+    d = await eng.refresh()
+    z = d["stats"]["interest"]
+    assert z["source"] == "trade_republic" and z["rate"] == 0.0175
+    assert z["cash"] == 10000.0 and z["per_year"] == 175.0
+    assert build_states(d)["sensor.saeulenwaechter_zins"]["state"] == 1.75
+
+
 # ------------------------------------------------------------------ echtes Depot
 
 async def test_depot_actions_recognition_and_expired_login(make_engine, sent, market, monkeypatch):

@@ -80,6 +80,8 @@ const STYLE = `
   .alarm-tag { display:inline-block; font-size:11px; font-weight:800; text-transform:uppercase; background:#fff;
                color:#d70015; padding:2px 8px; border-radius:10px; }
   .alarm-text { margin-top:6px; font-size:15px; font-weight:700; line-height:1.35; }
+  .interest { margin-top:10px; padding:8px 10px; border-radius:8px; background:var(--secondary-background-color, rgba(127,127,127,.12)); font-size:13px; }
+  .interest .muted { opacity:.7; }
   .alarm-table { width:100%; margin-top:8px; border-collapse:collapse; font-size:14px; }
   .alarm-table th { text-align:left; font-size:11px; text-transform:uppercase; opacity:.85; padding:4px 6px; }
   .alarm-table td { padding:6px; border-top:1px solid rgba(255,255,255,.25); white-space:nowrap; }
@@ -278,6 +280,16 @@ class SaeulenBase extends HTMLElement {
     </div>`;
   }
 
+  interestLine(z) {
+    if (!z) return "";
+    if (z.rate == null) return `<div class="note">Zinsen auf Cash: Satz noch unbekannt – kommt beim nächsten Abgleich mit Trade Republic.</div>`;
+    const rate = `${(z.rate * 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % p. a.`;
+    const src = z.source === "option" ? "eigener Wert" : "laut Trade Republic";
+    const earned = z.earned ? ` · bisher gutgeschrieben ${eur(z.earned, 2)}` : "";
+    return `<div class="interest"><span>💶 Zinsen auf Cash</span>
+      <b>${rate}</b> <span class="muted">(${src})</span> auf ${eur(z.cash, 0)} ≈ <b>${eur(z.per_year, 0)} im Jahr</b>${earned}</div>`;
+  }
+
   rebalanceTable(rows) {
     const pc = (v) => `${(v * 100).toLocaleString("de-DE", { maximumFractionDigits: 1 })} %`;
     const move = (r) => Math.abs(r.delta) < 1 ? "passt"
@@ -311,6 +323,7 @@ class SaeulenBase extends HTMLElement {
       </div>
       <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th></tr>
         ${st.rows.map(row).join("")}</table>
+      ${this.interestLine(st.interest)}
       <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
       ${this.history(d)}
     </div>`;

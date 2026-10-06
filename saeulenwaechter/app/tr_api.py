@@ -303,6 +303,19 @@ class TradeRepublic:
             self.sec_acc_no = body["securitiesAccountNumber"]
         return body
 
+    async def interest(self) -> float | None:
+        """Aktueller Zinssatz auf das Guthaben bei Trade Republic als Anteil (0,02 = 2 % p. a.), sonst None."""
+        status, body = await self._request("GET", "/api/v1/interest/details")
+        if status in (401, 403):
+            raise TRAuthError("Nicht eingeloggt.")
+        if status >= 400 or not isinstance(body, (dict, list)):
+            _LOGGER.info("TR-Zinssatz nicht verfügbar (HTTP %s)", status)
+            return None
+        rate = find_rate(body)
+        if rate is None:
+            _LOGGER.info("TR-Zinssatz nicht erkannt, Felder: %s", sorted(body)[:30] if isinstance(body, dict) else "Liste")
+        return rate
+
     # ------------------------------------------------------------- WebSocket
 
     async def fetch(self, payloads: list[dict], *, auth: bool = False, timeout: float = 25.0) -> list[Any]:
@@ -403,18 +416,20 @@ class TradeRepublic:
         await self.refresh_session()
         if not self.sec_acc_no:
             await self.account()
+        # Wie die Web-App: zuerst V2, dann die älteren Varianten als Rückfall
         res = await self.fetch([
-            {"type": "compactPortfolioByType", "secAccNo": self.sec_acc_no},
+            {"type": "compactPortfolioByTypeV2", "secAccNo": self.sec_acc_no},
             {"type": "cash"},
         ], auth=True)
         port, cash = res
         if isinstance(port, TRAuthError):
             raise port
+        for fallback in ({"type": "compactPortfolioByType", "secAccNo": self.sec_acc_no}, {"type": "compactPortfolio"}):
+            if not isinstance(port, Exception):
+                break
+            (port,) = await self.fetch([fallback], auth=True)
         if isinstance(port, Exception):
-            # Ältere Variante als Rückfall
-            (port,) = await self.fetch([{"type": "compactPortfolio"}], auth=True)
-            if isinstance(port, Exception):
-                raise port
+            raise port
         positions: dict[str, dict] = {}
         raw = []
         for cat in port.get("categories", []) or []:
@@ -426,7 +441,7 @@ class TradeRepublic:
             size = _f(p.get("netSize"))
             if not isin or not size:
                 continue
-            avg = _f(p.get("averageBuyIn"))
+            avg = _f(_amount(p.get("averageBuyIn")))
             if isin in positions:  # dieselbe ISIN in mehreren Kategorien: zusammenfassen
                 prev = positions[isin]
                 total = prev["size"] + size
@@ -435,12 +450,49 @@ class TradeRepublic:
                                    "avg_buy": (prev["avg_buy"] * prev["size"] + avg * size) / total if known else None}
             else:
                 positions[isin] = {"size": size, "avg_buy": avg}
+            # Was Trade Republic selbst als Gewinn seit Kauf zeigt (falls mitgeliefert) – zum Abgleich
+            perf = _f(_amount(p.get("performanceSinceBuyAbsolute")))
+            if perf is not None:
+                positions[isin]["tr_pnl"] = (positions[isin].get("tr_pnl") or 0) + perf
+        for isin, pos in positions.items():
+            _LOGGER.info("TR-Position %s: %s Stück, Kaufkurs Ø %s", isin, pos["size"], pos["avg_buy"])
         cash_eur = None
         if not isinstance(cash, Exception) and isinstance(cash, list):
             for c in cash:
                 if c.get("currencyId") == "EUR":
                     cash_eur = _f(c.get("amount"))
         return {"positions": positions, "cash": cash_eur}
+
+
+def _amount(v: Any) -> Any:
+    """Betrag als Zahl oder als ``{"value": …, "currency": …}`` (neuere TR-Antworten)."""
+    return v.get("value") if isinstance(v, dict) else v
+
+
+RATE_KEYS = ("interestRate", "rate", "currentInterestRate", "effectiveInterestRate", "annualRate", "apy")
+
+
+def find_rate(body: Any, depth: int = 0) -> float | None:
+    """Sucht den Zinssatz in der Antwort; Prozentangaben (2.0) werden zu Anteilen (0,02)."""
+    if depth > 4:
+        return None
+    if isinstance(body, dict):
+        for k in RATE_KEYS:
+            if k in body:
+                v = _f(_amount(body[k]))
+                if v is not None and 0 <= v < 25:
+                    return v / 100 if v >= 0.25 else v
+        for v in body.values():
+            if isinstance(v, (dict, list)):
+                r = find_rate(v, depth + 1)
+                if r is not None:
+                    return r
+    elif isinstance(body, list):
+        for v in body:
+            r = find_rate(v, depth + 1)
+            if r is not None:
+                return r
+    return None
 
 
 def _f(v: Any) -> float | None:

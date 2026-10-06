@@ -102,6 +102,11 @@ def build_states(d: dict) -> dict[str, dict[str, Any]]:
         "goldpreis_eur_g": _round(pg.get("price_g"), 3),
         "bestand": [{k: e.get(k) for k in ("name", "qty", "unit", "fineness", "fine_grams", "cost", "bought", "value")}
                     for e in pg.get("items", [])]})
+    zins = st.get("interest") or {}
+    put(f"sensor.{P}_zins", _pct(zins.get("rate")), {
+        "friendly_name": f"{NAME} Zinsen auf Cash", "icon": "mdi:percent-circle", "unit_of_measurement": "%",
+        "quelle": zins.get("source"), "stand": zins.get("at"), "cash": zins.get("cash"),
+        "zinsen_pro_jahr": zins.get("per_year"), "gutgeschrieben": zins.get("earned")})
     put(f"sensor.{P}_gewinn_verlust", _round(total.get("pnl")), {
         **_money(f"{NAME} Gewinn/Verlust", "mdi:finance"), "prozent": _pct(total.get("pnl_pct")),
         "einstand": total.get("cost")})
