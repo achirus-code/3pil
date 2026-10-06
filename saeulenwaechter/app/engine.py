@@ -885,6 +885,8 @@ class Engine:
                     "cost": size * pos["avg_buy"] if pos.get("avg_buy") else None,
                     "bid": bid,
                     "value": size * bid if bid else None,
+                    "change_24h": (quote["last"] / quote["pre"] - 1
+                                   if (quote := self._price(isin)).get("last") and quote.get("pre") else None),
                 })
         return out, unassigned
 
