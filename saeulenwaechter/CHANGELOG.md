@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.2
+
+- QR-Code wird quadratisch und vollständig angezeigt (SVG mit viewBox, feste Größe, breiterer Rand) – vorher konnte er beschnitten oder verzerrt sein und ließ sich nicht scannen.
+
 ## 2.5.1
 
 - Zinszeile ohne den Zusatz zum EZB-Einlagensatz.

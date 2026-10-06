@@ -34,9 +34,9 @@
   .login .muted { font-size:12px; opacity:.7; }
   .hidden { display:none !important; }
   .qr-wrap { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
-  .qr-box { width:220px; height:220px; display:flex; align-items:center; justify-content:center; background:#fff;
+  .qr-box { flex:none; width:240px; height:240px; aspect-ratio:1; display:flex; align-items:center; justify-content:center; background:#fff;
             color:#000; border-radius:12px; overflow:hidden; font-size:13px; }
-  .qr-box svg { width:100%; height:100%; }
+  .qr-box svg { display:block; width:100%; height:100%; shape-rendering:crispEdges; }
   .qr-box.dim { opacity:.25; }
   .qr-state { flex:1; min-width:180px; font-weight:600; }
   .login select { font:inherit; padding:8px 10px; border:1px solid var(--divider-color); border-radius:8px;
@@ -80,7 +80,7 @@
     <h2>Trade-Republic-Login</h2>
     <div id="step-qr">
       <p>Mit der Handy-Kamera oder in der Trade-Republic-App scannen und die Anmeldung in der App bestätigen.
-        Keine PIN nötig. Gespeichert wird nur die Web-Session.</p>
+        Keine PIN nötig. Nach dem Abgleich wird die Verbindung sofort wieder geschlossen.</p>
       <div class="qr-wrap"><div id="qr-box" class="qr-box">Lade QR-Code …</div><div id="qr-state" class="qr-state"></div></div>
       <div class="row" style="margin-top:10px">
         <button id="btn-qr-new" class="ghost hidden">Neuer QR-Code</button>
