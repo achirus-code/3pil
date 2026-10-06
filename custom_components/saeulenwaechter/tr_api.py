@@ -276,6 +276,7 @@ class TradeRepublic:
                 ex = next((e for e in val.get("exchanges", []) if e.get("slug") == exchange), {})
                 out[isin]["name"] = val.get("shortName") or ex.get("nameAtExchange") or val.get("name")
                 out[isin]["symbol"] = ex.get("symbolAtExchange")
+                out[isin]["tags"] = [t.get("id") for t in val.get("tags", []) if t.get("id")]
         return out
 
     async def portfolio(self) -> dict:
@@ -299,13 +300,22 @@ class TradeRepublic:
         raw = []
         for cat in port.get("categories", []) or []:
             raw.extend(cat.get("positions", []) or [])
-        raw.extend(port.get("positions", []) or [])
+        if not raw:  # ältere Variante „compactPortfolio“: flache Liste (nie beide zählen)
+            raw.extend(port.get("positions", []) or [])
         for p in raw:
             isin = p.get("isin") or p.get("instrumentId")
             size = _f(p.get("netSize"))
             if not isin or not size:
                 continue
-            positions[isin] = {"size": size, "avg_buy": _f(p.get("averageBuyIn"))}
+            avg = _f(p.get("averageBuyIn"))
+            if isin in positions:  # dieselbe ISIN in mehreren Kategorien: zusammenfassen
+                prev = positions[isin]
+                total = prev["size"] + size
+                known = avg is not None and prev["avg_buy"] is not None and total
+                positions[isin] = {"size": total,
+                                   "avg_buy": (prev["avg_buy"] * prev["size"] + avg * size) / total if known else None}
+            else:
+                positions[isin] = {"size": size, "avg_buy": avg}
         cash_eur = None
         if not isinstance(cash, Exception) and isinstance(cash, list):
             for c in cash:

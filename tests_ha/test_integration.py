@@ -60,7 +60,7 @@ async def _setup(hass: HomeAssistant):
     return result["result"]
 
 
-async def test_paper_setup_decision_and_messages(hass, mocked, sent, freezer, hass_ws_client):
+async def test_paper_setup_decision_and_messages(hass, mocked, sent, freezer, hass_ws_client, hass_admin_user):
     freezer.move_to("2026-10-06 08:00:00+00:00")  # Di. 10:00 Berlin, Börse offen
     await hass.config.async_set_time_zone("Europe/Berlin")
     entry = await _setup(hass)
@@ -88,7 +88,9 @@ async def test_paper_setup_decision_and_messages(hass, mocked, sent, freezer, ha
     assert len(sent) == 1
 
     # Websocket für Karte/Panel
-    ws = await hass_ws_client(hass)
+    # Token zur eingefrorenen Zeit ausstellen (das Fixture-Token entsteht zur echten Uhrzeit)
+    refresh = await hass.auth.async_create_refresh_token(hass_admin_user, "https://example.com/app")
+    ws = await hass_ws_client(hass, hass.auth.async_create_access_token(refresh))
     await ws.send_json({"id": 1, "type": "saeulenwaechter/data"})
     msg = await ws.receive_json()
     assert msg["success"]
@@ -115,7 +117,7 @@ async def test_paper_setup_decision_and_messages(hass, mocked, sent, freezer, ha
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_depot_login_actions_and_reauth(hass, mocked, sent, freezer):
+async def test_depot_login_actions_and_reauth(hass, mocked, sent, freezer, monkeypatch):
     from custom_components.saeulenwaechter.tr_api import TRAuthError
 
     freezer.move_to("2026-10-06 08:00:00+00:00")
@@ -172,6 +174,45 @@ async def test_depot_login_actions_and_reauth(hass, mocked, sent, freezer):
         assert len(sent) == n + 1
         print("\n----- WhatsApp Depot #2 -----\n" + sent[-1])
         assert sent[-1].count("umgesetzt") == 2
+
+        # Positionen werden per ISIN erkannt: Vanguard zählt wie SPYI, WisdomTree wie Xetra-Gold,
+        # eine Einzelaktie gehört zu keiner Säule
+        monkeypatch.setitem(FIXTURE["market"], "IE000VAHT5T0",
+                            {"price": {"bid": 4.46, "ask": 4.47, "last": 4.46}, "name": "FTSE Global All-Cap USD (Acc)"})
+        monkeypatch.setitem(FIXTURE["market"], "JE00BN2CJ301",
+                            {"price": {"bid": 366.0, "ask": 366.1, "last": 366.0}, "name": "Core Physical Gold USD"})
+        monkeypatch.setitem(FIXTURE["market"], "US0378331005",
+                            {"price": {"bid": 200.0, "ask": 200.2, "last": 200.0}, "name": "Apple"})
+        depot["positions"] = {"IE000VAHT5T0": {"size": 9000.0, "avg_buy": 4.3},
+                              "JE00BN2CJ301": {"size": 80.0, "avg_buy": 350.0},
+                              "US0378331005": {"size": 5.0, "avg_buy": 180.0}}
+        await coord.async_refresh()
+        assert hass.states.get("sensor.saeulenwaechter_welt_aktion").state == "halten"
+        assert hass.states.get("sensor.saeulenwaechter_gold_aktion").state == "halten"
+        welt = coord.data["pillars"]["welt"]["held"][0]
+        assert welt["isin"] == "IE000VAHT5T0" and welt["counts_as"] == "IE00B3YLTY66"
+        assert welt["counts_as_name"] == "SPDR MSCI ACWI IMI"
+        attrs = hass.states.get("sensor.saeulenwaechter_modus").attributes
+        assert [u["isin"] for u in attrs["nicht_zugeordnet"]] == ["US0378331005"]
+        print("\n----- WhatsApp Depot #3 -----\n" + sent[-1])
+        assert "nicht zugeordnet: Apple (US0378331005)" in sent[-1]
+        split = attrs["tr_verteilung"]
+        rows = {r["key"]: r for r in split["rows"]}
+        assert split["base"] == pytest.approx(9000 * 4.46 + 80 * 366.0 + 30000.0)
+        assert rows["welt"]["soll"] == pytest.approx(0.4) and rows["anleihen"]["soll"] == 0.0
+        assert split["cash"]["soll"] == pytest.approx(0.3)
+        assert split["unassigned_value"] == pytest.approx(1000.0)
+
+        # Eigene Zusatz-ISIN in den Optionen: die Aktie zählt dann zur Welt-Säule
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {**{k: v for k, v in result["data_schema"]({}).items()}, "extra_welt": "us0378331005, x"})
+        assert entry.options["extra_welt"] == "US0378331005"
+        await hass.async_block_till_done()
+        coord = hass.data[DOMAIN][entry.entry_id]
+        await coord.async_refresh()
+        assert coord.data["depot"]["unassigned"] == []
+        assert {h["isin"] for h in coord.data["pillars"]["welt"]["held"]} == {"IE000VAHT5T0", "US0378331005"}
 
         # Login abgelaufen → Reauth-Flow + eine Nachricht
         depot = TRAuthError("abgelaufen")

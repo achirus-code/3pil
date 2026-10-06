@@ -35,6 +35,17 @@ type: custom:saeulenwaechter-card
 pillar: welt                               # Detailansicht: Hero, Position, Signale, Monatsstreifen, Säulen
 ```
 
+**Depot erkennen (mit Login):** Die Positionen bei Trade Republic werden anhand der ISIN den Säulen zugeordnet.
+Gleichwertige Produkte zählen automatisch wie das Säulen-Instrument und lösen keinen Wechsel aus, z. B.
+Vanguard FTSE Global All-Cap / FTSE All-World, iShares Core MSCI World und MSCI ACWI (Welt), WisdomTree Core
+Physical Gold, EUWAX Gold II, iShares und Invesco Physical Gold (Gold), iShares und Vanguard
+Euro-Staatsanleihen (Anleihen). Weitere ISINs lassen sich in den Optionen je Säule eintragen. Positionen, die zu
+keiner Säule passen, zeigt die Karte als „nicht zugeordnet“ (mit Vorschlag) und meldet sie einmal per WhatsApp.
+
+**Verteilung bei Trade Republic:** Unter jedem Säulen-Balken zeigt ein zweiter, lila Balken den Anteil im
+TR-Depot (erkannte Positionen + Cash) mit dem Soll laut aktueller Entscheidung als Strich, dazu eine Cash-Zeile.
+Hält eine Säule mehrere Produkte (z. B. zwei Welt-ETFs), ist der Balken je Produkt farbig unterteilt.
+
 **Entitäten** (je Säule `welt`, `gold`, `anleihen`):
 
 | Entität | Inhalt |
@@ -56,6 +67,7 @@ Services: `saeulenwaechter.refresh`, `saeulenwaechter.apply_rebalance`, `saeulen
 | Erkenntnis | Beispiel |
 |---|---|
 | Monatsentscheidung (erster Handelstag, LSX offen) | „📅 Monatsentscheidung Nov. 2026 – Welt: Trend abwärts – Rezessionszeichen: US-Zinskurve ➜ WECHSELN: SPDR … komplett verkaufen, danach den Erlös in … anlegen“ |
+| Depotposition keiner Säule zugeordnet (mit Login) | „🔎 Depotposition nicht zugeordnet: … – vermutlich Gold“ (einmal je ISIN) |
 | Depot weicht vom Ziel ab (mit Login) | „🛠 Gold: KAUFEN: Xetra-Gold für ca. 30.000 €“ – und „✅ umgesetzt“, sobald es im Depot liegt |
 | Signal würde zum Monatsende kippen (letzte 7 Tage) | „👀 Welt: Trend würde kippen – heute 10,10 € unter Umschaltkurs 10,17 €“ |
 | Rezessionszeichen wechselt | „⚠️ US-Erstanträge warnt jetzt …“ |

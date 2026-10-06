@@ -61,8 +61,12 @@
           "total": "Gesamtbetrag (€) – eine Änderung setzt die Beträge auf 40/30/30",
           "rebalance_month": "Monat für das jährliche Angleichen (1–12)",
           "bls_key": "BLS-API-Key (optional)",
-          "use_depot": "Echtes Trade-Republic-Depot verwenden"
-        }
+          "use_depot": "Echtes Trade-Republic-Depot verwenden",
+          "extra_welt": "Weitere ISINs Welt (zählen wie SPDR MSCI ACWI IMI)",
+          "extra_gold": "Weitere ISINs Gold (zählen wie Xetra-Gold)",
+          "extra_anleihen": "Weitere ISINs Anleihen (zählen wie Xtrackers Eurozone Gov Bond)"
+        },
+        "description": "Depotpositionen werden nach dem Login anhand der ISIN erkannt. Bekannte gleichwertige Produkte (z. B. Vanguard FTSE Global All-Cap, WisdomTree Core Physical Gold) zählen automatisch. Weitere ISINs kommagetrennt eintragen."
       }
     }
   },

@@ -13,10 +13,12 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.util import dt as dt_util
 
+from . import strategy as S
 from .const import (
     CONF_BLS_KEY,
     CONF_COOKIES,
     CONF_DEVICE_ID,
+    CONF_EXTRA_ISINS,
     CONF_LOGIN_AT,
     CONF_MONTHLY_REPORT,
     CONF_NOTIFY,
@@ -188,6 +190,9 @@ class SaeulenOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
+            for opt in CONF_EXTRA_ISINS.values():
+                if opt in user_input:  # sauber gespeichert: „IE000VAHT5T0, JE00BN2CJ301“
+                    user_input[opt] = ", ".join(S.parse_isins(user_input[opt]))
             return self.async_create_entry(data={**self.config_entry.options, **user_input})
         o = {**self.config_entry.options}
         has_login = bool(self.config_entry.data.get(CONF_COOKIES))
@@ -205,4 +210,6 @@ class SaeulenOptionsFlow(OptionsFlow):
         }
         if has_login:
             schema[vol.Required(CONF_USE_DEPOT, default=o.get(CONF_USE_DEPOT, True))] = bool
+            for opt in CONF_EXTRA_ISINS.values():
+                schema[vol.Optional(opt, default=o.get(opt, ""))] = str
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))

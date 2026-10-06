@@ -17,6 +17,7 @@ const STATE_ICONS = {
 const MONTH_COLORS = { in: "var(--sw-green)", hedged: "var(--sw-blue)", parked: "var(--sw-teal)", cash: "var(--sw-grey)" };
 const MONTH_LABELS = { in: "Investiert", hedged: "Gesichert", parked: "Ausgewichen", cash: "Cash" };
 const MONTHS = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sep.", "Okt.", "Nov.", "Dez."];
+const TR_SHADES = ["#af52de", "#ff2d92", "#5e5ce6", "#bf5af2", "#ff6482"];
 const ACTION_COLORS = { buy: "var(--sw-green)", sell: "var(--sw-red)", switch: "var(--sw-orange)" };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -29,7 +30,7 @@ const pct = (v, d = 1, sign = true) => {
 const monthLabel = (k) => { if (!k) return "–"; const [y, m] = k.split("-"); return `${MONTHS[+m - 1]} ${y}`; };
 
 const STYLE = `
-  :host { --sw-green:#34c759; --sw-red:#ff3b30; --sw-orange:#ff9500; --sw-blue:#0a84ff; --sw-teal:#30b0c7;
+  :host { --sw-green:#34c759; --sw-red:#ff3b30; --sw-orange:#ff9500; --sw-blue:#0a84ff; --sw-teal:#30b0c7; --sw-tr:#af52de;
           --sw-grey:rgba(142,142,147,.4); display:block; }
   .num { font-variant-numeric: tabular-nums; }
   ha-card { overflow:hidden; }
@@ -64,6 +65,9 @@ const STYLE = `
   .bar { position:relative; height:5px; border-radius:3px; background:var(--divider-color); margin:5px 0 3px; }
   .bar .fill { position:absolute; left:0; top:0; bottom:0; border-radius:3px; }
   .bar .mark { position:absolute; top:-2px; bottom:-2px; width:1.5px; background:var(--primary-text-color); }
+  .bar.tr { height:4px; margin:3px 0 2px; }
+  .trv { font-size:11px; color:var(--sw-tr); }
+  .trv.warn { color:var(--sw-orange); }
   .pillar .val { font-size:12px; color:var(--secondary-text-color); }
   .note { font-size:12px; color:var(--secondary-text-color); margin-top:4px; }
   .note.warn { color: var(--sw-orange); font-weight:500; }
@@ -157,7 +161,7 @@ class SaeulenBase extends HTMLElement {
     return `<div class="section"><div class="label">Offene Position</div>${p.held.map((h) => {
       const res = h.value != null && h.cost ? h.value / h.cost - 1 : null;
       return `<div class="grid num">
-        <div class="kv"><div class="k">Instrument</div><div class="v">${esc(h.name)}</div></div>
+        <div class="kv"><div class="k">Instrument</div><div class="v">${esc(h.name)}${h.counts_as_name ? `<div class="s" style="font-size:11px;color:var(--secondary-text-color)">zählt als ${esc(h.counts_as_name)}</div>` : ""}</div></div>
         <div class="kv"><div class="k">Menge</div><div class="v">${(h.size ?? 0).toLocaleString("de-DE", { maximumFractionDigits: 4 })}</div></div>
         <div class="kv"><div class="k">Einstieg</div><div class="v">${eur(h.avg_buy)}</div></div>
         <div class="kv"><div class="k">Investiert</div><div class="v">${eur(h.cost, 0)}</div></div>
@@ -195,6 +199,44 @@ class SaeulenBase extends HTMLElement {
         ${seen.map((s) => `<span><i style="background:${MONTH_COLORS[s]}"></i>${MONTH_LABELS[s]}</span>`).join("")}</div>`;
   }
 
+  trBar(split, key, label) {
+    if (!split) return "";
+    const t = key === "cash" ? split.cash : (split.rows || []).find((x) => x.key === key);
+    if (!t) return "";
+    const diff = (t.ist - t.soll) * 100;
+    const warn = Math.abs(diff) >= 5;
+    // mehrere Produkte einer Säule: je ein Abschnitt, abgestuft eingefärbt
+    const parts = t.parts && t.parts.length > 1 ? t.parts : null;
+    let left = 0;
+    const fills = parts
+      ? parts.map((x, i) => {
+          const w = x.ist * 100;
+          const seg = `<div class="fill" title="${esc(x.name)} (${esc(x.isin)}): ${Math.round(x.ist * 100)} % · ${eur(x.value, 0)}"
+            style="left:${left}%;width:${w}%;background:${TR_SHADES[i % TR_SHADES.length]};border-radius:0"></div>`;
+          left += w;
+          return seg;
+        }).join("")
+      : `<div class="fill" style="width:${Math.min(100, t.ist * 100)}%;background:var(--sw-tr)"></div>`;
+    const legend = parts
+      ? `<div class="trv num">${parts.map((x, i) => `<span style="color:${TR_SHADES[i % TR_SHADES.length]}">■</span> ${esc(x.name)} ${Math.round(x.ist * 100)} %`).join(" · ")}</div>`
+      : "";
+    return `<div class="bar tr" style="overflow:hidden">${fills}
+        <div class="mark" style="left:${t.soll * 100}%"></div></div>
+      <div class="trv num${warn ? " warn" : ""}">${label ? esc(label) + " · " : ""}Trade Republic ${Math.round(t.ist * 100)} % · soll ${Math.round(t.soll * 100)} % · ${eur(t.value, 0)}</div>${legend}`;
+  }
+
+  trExtra(d) {
+    const split = d.tr_split;
+    const un = (d.depot && d.depot.unassigned) || [];
+    if (!split && !un.length) return "";
+    const cash = split ? `<div class="pillar"><div class="head"><span>Cash</span></div>${this.trBar(split, "cash")}</div>` : "";
+    const list = un.length ? `<div class="note warn">Nicht zugeordnet: ${un.map((u) =>
+      `${esc(u.name)} (${esc(u.isin)}, ${eur(u.value, 0)})${u.suggestion_name ? " – vermutlich " + esc(u.suggestion_name) : ""}`).join("; ")}.
+      In den Optionen unter „Weitere ISINs …“ eintragen, dann zählt die Position zur Säule.</div>` : "";
+    const legend = split ? `<div class="note"><span style="color:var(--sw-tr)">■</span> Verteilung bei Trade Republic (erkannte Positionen + Cash = ${eur(split.base, 0)}), Strich = Soll laut aktueller Entscheidung.</div>` : "";
+    return cash + legend + list;
+  }
+
   pillars(d, active) {
     const ov = d.overview;
     const rows = ov.rows.map((r) => {
@@ -206,8 +248,9 @@ class SaeulenBase extends HTMLElement {
         <div class="bar"><div class="fill" style="width:${Math.min(100, r.ist * 100)}%;background:${esc(r.color)}"></div>
           <div class="mark" style="left:${r.soll * 100}%"></div></div>
         <div class="val num">${ov.due ? `${eur(r.value, 0)} → ${eur(r.target_value, 0)}` : eur(r.value, 0)}</div>
+        ${this.trBar(d.tr_split, r.key)}
       </div>`;
-    }).join("");
+    }).join("") + this.trExtra(d);
     const note = ov.due
       ? `<div class="note warn">Um ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp von den Soll-Anteilen abgewichen – die Beträge nach dem Pfeil stellen sie wieder her.</div>
          <div class="buttons" style="margin-top:8px"><button class="sw" data-action="rebalance">Angleichung übernehmen</button></div>`

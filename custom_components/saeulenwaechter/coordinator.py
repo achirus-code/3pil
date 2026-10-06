@@ -24,6 +24,7 @@ from .const import (
     CONF_BLS_KEY,
     CONF_COOKIES,
     CONF_DEVICE_ID,
+    CONF_EXTRA_ISINS,
     CONF_LOGIN_AT,
     CONF_MONTHLY_REPORT,
     CONF_NOTIFY,
@@ -37,6 +38,7 @@ from .const import (
     DEFAULT_REBALANCE_MONTH,
     DEFAULT_TOTAL,
     DOMAIN,
+    EQUIVALENT_NAMES,
     EXCHANGE,
     HISTORY_MONTHS,
     MACRO_MAX_AGE_DAYS,
@@ -118,6 +120,11 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
     @property
     def options(self) -> dict:
         return {**self.entry.data, **self.entry.options}
+
+    @property
+    def extra_isins(self) -> dict[str, list[str]]:
+        """Eigene Zusatz-ISINs je Säule aus den Optionen."""
+        return {key: S.parse_isins(self.options.get(opt)) for key, opt in CONF_EXTRA_ISINS.items()}
 
     @property
     def use_depot(self) -> bool:
@@ -282,7 +289,7 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
         if not isin:
             return "Cash"
         m = self.state["market"].get(isin, {})
-        return NAMES.get(isin) or m.get("name") or isin
+        return NAMES.get(isin) or EQUIVALENT_NAMES.get(isin) or m.get("name") or isin
 
     def _price(self, isin: str) -> dict:
         return self.state["market"].get(isin, {}).get("price") or {}
@@ -350,7 +357,11 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
                 self._paper_execute(key, p["st"], amounts[key], now)
 
         # 3) Bestände je Säule
-        holdings = self._allocate(pillars, depot) if mode == "depot" else self._paper_holdings(pillars)
+        unassigned: list[dict] = []
+        if mode == "depot":
+            holdings, unassigned = self._allocate(pillars, depot)
+        else:
+            holdings = self._paper_holdings(pillars)
 
         # 4) Werte, Aktion, Status
         values: dict[str, float] = {}
@@ -364,7 +375,8 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
                 value = st.get("proceeds") or amounts[key]
             values[key] = value
             target = st.get("target") if st.get("month") else None
-            action = S.plan_action([h["isin"] for h in held], target) if st.get("month") else None
+            action = S.plan_action([h.get("counts_as") or h["isin"] for h in held], target) \
+                if st.get("month") else None
             if mode == "depot" and not depot.get("connected"):
                 action = None  # ohne Depotdaten keine Handlungsanweisung
             quote = self._price(cfg["isin"])
@@ -410,6 +422,17 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
             out_pillars[key]["status"] = self._status_text(out_pillars[key], res, today)
 
         overview = S.pillars_overview(values, amounts)
+        # Verteilung bei Trade Republic: nur erkannte Positionen + Cash, gegen das Soll laut Strategie
+        split = None
+        if mode == "depot" and depot.get("connected"):
+            tr_values = {k: sum(h.get("value") or 0 for h in holdings.get(k, [])) for k in pillars}
+            soll = {r["key"]: r["soll"] for r in overview["rows"]}
+            targets = {k: (p["st"].get("target") if p["st"].get("month") else p["res"].get("target"))
+                       for k, p in pillars.items()}
+            split = S.tr_split(tr_values, targets, soll, depot.get("cash"),
+                               sum(u.get("value") or 0 for u in unassigned),
+                               {k: [{"isin": h["isin"], "name": h["name"], "value": h.get("value") or 0}
+                                    for h in holdings.get(k, [])] for k in pillars})
         for row in overview["rows"]:
             row["name"] = out_pillars[row["key"]]["name"]
             row["color"] = out_pillars[row["key"]]["color"]
@@ -429,9 +452,12 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
                 "connected": depot.get("connected", False),
                 "error": depot.get("error"),
                 "cash": depot.get("cash"),
-                "positions": {i: {**p, "name": self._name(i), "bid": self._price(i).get("bid")}
+                "positions": {i: {**p, "name": self._name(i), "bid": self._price(i).get("bid"),
+                                  "counts_as": S.resolve_isin(i, PILLARS, self.extra_isins)}
                               for i, p in (depot.get("positions") or {}).items()},
+                "unassigned": unassigned,
             },
+            "tr_split": split,
             "market_error": market.get("_error"),
             "macro_status": {k: {"ok_at": v.get("ok_at"), "error": v.get("error")}
                              for k, v in self.state["macro"].items()},
@@ -485,32 +511,52 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
 
     # ------------------------------------------------------ Bestände/Depot
 
-    def _allocate(self, pillars: dict, depot: dict) -> dict[str, list[dict]]:
-        """Ordnet die echten Depotpositionen den Säulen zu.
+    def _allocate(self, pillars: dict, depot: dict) -> tuple[dict[str, list[dict]], list[dict]]:
+        """Erkennt die echten Depotpositionen anhand der ISIN und ordnet sie den Säulen zu.
 
-        Ein Instrument gehört zu den Säulen, deren Ziel (oder Ziel des Vormonats) es ist; sonst
-        zur Säule, deren eigenes Instrument es ist. Teilen sich mehrere Säulen ein Instrument
-        (z. B. XGLE als Anleihen-Säule und als Ausweichziel), wird nach Beträgen aufgeteilt.
+        Jede ISIN wird erst auf das Säulen-Instrument abgebildet, für das sie zählt (sie selbst, ein
+        gleichwertiges Produkt aus dem Katalog oder eine eigene Zusatz-ISIN). Dieses Instrument gehört zu
+        den Säulen, deren Ziel (oder Ziel des Vormonats) es ist; sonst zur Säule, deren eigenes Instrument
+        es ist. Teilen sich mehrere Säulen ein Instrument (z. B. XGLE als Anleihen-Säule und als
+        Ausweichziel), wird nach Beträgen aufgeteilt. Was nicht erkannt wird, landet in der zweiten Liste.
         """
         amounts = self.state["amounts"]
+        extras = self.extra_isins
         out: dict[str, list[dict]] = {k: [] for k in pillars}
+        unassigned: list[dict] = []
         for isin, pos in (depot.get("positions") or {}).items():
-            claim = [k for k, p in pillars.items()
-                     if isin in _candidates(p["cfg"]) and isin in (p["st"].get("target"), p["st"].get("prev_target"))]
+            bid = self._price(isin).get("bid")
+            counts_as = S.resolve_isin(isin, PILLARS, extras)
+            claim: list[str] = []
+            if counts_as:
+                claim = [k for k, p in pillars.items() if counts_as in _candidates(p["cfg"])
+                         and counts_as in (p["st"].get("target"), p["st"].get("prev_target"))]
+                if not claim:
+                    claim = [k for k, p in pillars.items() if p["cfg"]["isin"] == counts_as]
+                if not claim:
+                    claim = [k for k, p in pillars.items() if counts_as in _candidates(p["cfg"])]
             if not claim:
-                claim = [k for k, p in pillars.items() if p["cfg"]["isin"] == isin]
-            if not claim:
-                claim = [k for k, p in pillars.items() if isin in _candidates(p["cfg"])]
-            if not claim:
+                m = self.state["market"].get(isin, {})
+                suggestion = S.suggest_pillar(self._name(isin), m.get("tags"))
+                unassigned.append({
+                    "isin": isin,
+                    "name": self._name(isin),
+                    "size": pos["size"],
+                    "bid": bid,
+                    "value": pos["size"] * bid if bid else None,
+                    "suggestion": suggestion,
+                    "suggestion_name": next((c["name"] for c in PILLARS if c["key"] == suggestion), None),
+                })
                 continue
             total = sum(amounts[k] for k in claim) or 1
-            bid = self._price(isin).get("bid")
             for k in claim:
                 share = amounts[k] / total
                 size = pos["size"] * share
                 out[k].append({
                     "isin": isin,
                     "name": self._name(isin),
+                    "counts_as": counts_as,
+                    "counts_as_name": self._name(counts_as) if counts_as != isin else None,
                     "size": size,
                     "share": share,
                     "avg_buy": pos.get("avg_buy"),
@@ -518,7 +564,7 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
                     "bid": bid,
                     "value": size * bid if bid else None,
                 })
-        return out
+        return out, unassigned
 
     def _paper_holdings(self, pillars: dict) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}
@@ -649,6 +695,16 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
                     done = prev.split(":")[0] in ("buy", "sell", "switch")
                     out.append((k, fp, f"✅ *{p['name']}*: umgesetzt – {p['status']}" if done else None))
 
+        # Positionen, die keiner Säule zugeordnet werden konnten (einmal je ISIN)
+        if data["mode"] == "depot" and data["depot"]["connected"]:
+            for u in data["depot"].get("unassigned") or []:
+                hint = (f" Vermutlich {u['suggestion_name']} – in den Optionen unter „Weitere ISINs {u['suggestion_name']}“ "
+                        f"eintragen, dann zählt sie zur Säule." if u.get("suggestion_name")
+                        else " Sie zählt zu keiner Säule.")
+                out.append((f"unassigned:{u['isin']}", "1",
+                            f"🔎 Depotposition nicht zugeordnet: {u['name']} ({u['isin']}), "
+                            f"≈ {S.fmt_eur(u.get('value'), 0)}.{hint}"))
+
         # Rezessionszeichen
         for key, row in data["macro"].items():
             if row["state"] not in ("ok", "warn"):
@@ -725,7 +781,10 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
             messages.insert(0, f"🏛️ *{NAME}* ist aktiv. Modus: "
                                f"{'echtes Depot' if data['mode'] == 'depot' else 'Papierdepot'}.\n"
                                + "\n".join(f"{EMOJI.get(p['state'], '•')} {p['name']}: {p['status']}"
-                                           for p in data["pillars"].values()))
+                                           for p in data["pillars"].values())
+                               + "".join(f"\n🔎 Nicht zugeordnet: {u['name']} ({u['isin']})"
+                                         + (f" – vermutlich {u['suggestion_name']}" if u.get("suggestion_name") else "")
+                                         for u in (data["depot"].get("unassigned") or [])))
             self.state["initialized"] = True
         if messages:
             await self.send_message("\n\n".join(messages))
