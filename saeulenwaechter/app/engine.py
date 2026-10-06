@@ -20,6 +20,7 @@ from .const import (
     CANDLE_REFRESH_H,
     CONF_BLS_KEY,
     CONF_CASH_RATE,
+    CONF_CASH_RESERVE,
     CONF_EXTRA_ISINS,
     CONF_MONTHLY_REPORT,
     CONF_NOTIFY,
@@ -505,6 +506,14 @@ class Engine:
     def _price(self, isin: str) -> dict:
         return self.state["market"].get(isin, {}).get("price") or {}
 
+    def _strategy_cash(self, depot: dict) -> float:
+        """Cash bei Trade Republic, das zur Strategie gehört: alles außer der eingestellten Reserve."""
+        try:
+            reserve = float(self.options.get(CONF_CASH_RESERVE) or 0)
+        except (TypeError, ValueError):
+            reserve = 0.0
+        return max((depot.get("cash") or 0.0) - reserve, 0.0)
+
     def cash_rate(self) -> dict:
         """Zinssatz auf Cash: eigener Wert aus den Optionen, sonst der zuletzt von Trade Republic gelesene."""
         own = self.options.get(CONF_CASH_RATE)
@@ -516,6 +525,10 @@ class Engine:
         tr = self.state.get("interest") or {}
         if tr.get("rate") is not None:
             return {"rate": tr["rate"], "source": "trade_republic", "at": tr.get("at")}
+        ecb = self._macro_data("ecb_rate", self.now())
+        if ecb:
+            day = max(ecb)
+            return {"rate": ecb[day] / 100, "source": "ezb", "at": day}
         return {"rate": None, "source": None, "at": None}
 
     def _accrue_interest(self, pillars: dict, amounts: dict, today: date, rate: float | None) -> None:
@@ -619,7 +632,7 @@ class Engine:
         # nicht den konfigurierten Betrag, der im Depot gar nicht existiert.
         empty = [k for k in pillars if not holdings.get(k)]
         empty_soll = sum(amounts[k] for k in empty) or 1
-        depot_cash = depot.get("cash") or 0.0
+        depot_cash = self._strategy_cash(depot)
         # Echtes Depot: Säulenbeträge immer als Anteil am tatsächlichen Depot (40/30/30 vom Ist-Gesamtwert),
         # der eingestellte Gesamtbetrag zählt nur für das Papierdepot.
         base = dict(amounts)
@@ -705,7 +718,7 @@ class Engine:
             targets = {k: (p["st"].get("target") if p["st"].get("month") else p["res"].get("target"))
                        for k, p in pillars.items()}
             # Papierdepot: Cash ist, was die Säulen ohne Position gerade halten (Erlös bzw. Betrag)
-            cash = depot.get("cash") if mode == "depot" else sum(values[k] for k in pillars if not holdings.get(k))
+            cash = self._strategy_cash(depot) if mode == "depot" else sum(values[k] for k in pillars if not holdings.get(k))
             split = S.tr_split(tr_values, targets, soll, cash,
                                sum(u.get("value") or 0 for u in unassigned),
                                {k: [{"isin": h["isin"], "name": h["name"], "value": h.get("value") or 0}

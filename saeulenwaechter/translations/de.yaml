@@ -34,3 +34,6 @@ configuration:
   cash_zins:
     name: Zinssatz auf Cash in % (optional)
     description: Leer lassen, dann gilt der Zinssatz, den Trade Republic beim Abgleich meldet. Ein eigener Wert (z. B. 2,0) hat Vorrang.
+  cash_reserve:
+    name: Cash-Reserve außerhalb der Strategie (€)
+    description: Dieser Teil des Guthabens bei Trade Republic zählt nicht zur Strategie (z. B. Notgroschen). 0 = alles Cash gehört zur Strategie.

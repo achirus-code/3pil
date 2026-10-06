@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.0
+
+- Säulen in Cash sind klar gekennzeichnet („in Cash“); die Angleichen-Tabelle sagt „als Cash halten“ / „aus Cash nehmen“ statt kaufen/verkaufen.
+- Neue Option **Cash-Reserve außerhalb der Strategie**: dieser Teil des TR-Guthabens zählt nicht zu den Säulen.
+- Zinssatz: ohne Angabe von Trade Republic gilt der EZB-Einlagensatz (täglich von der EZB).
+
 ## 2.3.1
 
 - US-Erstanträge: Ein Monat gilt erst als vollständig, wenn die Woche bis zu seinem letzten Samstag gemeldet ist. Bisher wurde Anfang des Monats – genau zur Monatsentscheidung – oft der Vormonat ohne seine letzte Woche ausgewertet.

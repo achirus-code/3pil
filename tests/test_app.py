@@ -48,6 +48,8 @@ def market(monkeypatch):
 
     def fetcher(key):
         async def f(session, *a):
+            if key == "ecb_rate":
+                return {"2026-10-02": 2.0, "2026-10-05": 2.0}
             return FIXTURE["macro"][key]
         return f
 
@@ -401,6 +403,10 @@ async def test_depot_empty_pillars_use_tr_cash(make_engine, monkeypatch):
     total = p["welt"]["value"] + 6000.0
     assert p["gold"]["amount"] == pytest.approx(total * 0.3, abs=0.01)
     assert p["gold"]["buy_budget"] == pytest.approx(total * 0.3, abs=0.01)
+    # Reserve außerhalb der Strategie: zählt nicht zu den Säulen
+    eng2 = await make_engine({"cash_reserve": 4000})
+    d2 = await eng2.refresh()
+    assert d2["pillars"]["anleihen"]["value"] == pytest.approx(1000.0)
     r = eng.data["reconcile"]
     assert r["cash"] == 6000.0 and r["counted"] == pytest.approx(p["welt"]["value"]) and r["unassigned"] == 0
 
@@ -487,3 +493,10 @@ def test_page_and_card_share_no_global_names():
     page_top = set(names.findall("\n".join(re.findall(r"<script>(.*?)</script>", page, re.S))))
     card_top = set(re.findall(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)", card, re.M))
     assert not page_top & card_top
+
+
+async def test_cash_rate_falls_back_to_ecb_deposit_rate(make_engine):
+    eng = await make_engine()
+    d = await eng.refresh()
+    z = d["stats"]["interest"]
+    assert z["source"] == "ezb" and z["rate"] == pytest.approx(0.02) and z["at"] == "2026-10-05"

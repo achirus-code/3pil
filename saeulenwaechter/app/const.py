@@ -5,7 +5,7 @@ from __future__ import annotations
 DOMAIN = "saeulenwaechter"
 ENTITY_PREFIX = "saeulenwaechter"
 NAME = "Säulenwächter"
-VERSION = "2.3.1"
+VERSION = "2.4.0"
 
 # Config-Entry-Daten
 CONF_USE_DEPOT = "use_depot"
@@ -21,6 +21,7 @@ CONF_SWITCH_WARNING = "switch_warning"
 CONF_REBALANCE_MONTH = "rebalance_month"
 CONF_BLS_KEY = "bls_key"
 CONF_CASH_RATE = "cash_zins"
+CONF_CASH_RESERVE = "cash_reserve"
 # Eigene Zusatz-ISINs je Säule (zählen wie das eigene Instrument der Säule)
 CONF_EXTRA_ISINS = {"welt": "extra_welt", "gold": "extra_gold", "anleihen": "extra_anleihen"}
 

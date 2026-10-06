@@ -19,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 ECB = "https://data-api.ecb.europa.eu/service/data/{flow}?format=csvdata&detail=dataonly&lastNObservations={n}"
 EURIBOR_FLOW = "FM/M.U2.EUR.RT.MM.EURIBOR3MD_.HSTA"
 EURUSD_FLOW = "EXR/M.USD.EUR.SP00.E"
+ECB_DFR_FLOW = "FM/D.U2.EUR.4F.KR.DFR.LEV"  # Einlagensatz der EZB (täglich)
 BLS_V2 = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 BLS_V1 = "https://api.bls.gov/publicAPI/v1/timeseries/data/LNS14000000"
 FRED_CLAIMS = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=ICNSA&cosd={start}"
@@ -57,6 +58,11 @@ async def fetch_euribor(session: aiohttp.ClientSession) -> dict[str, float]:
 
 async def fetch_eurusd(session: aiohttp.ClientSession) -> dict[str, float]:
     return await _ecb(session, EURUSD_FLOW, 48)
+
+
+async def fetch_ecb_rate(session: aiohttp.ClientSession) -> dict[str, float]:
+    """Einlagensatz der EZB in % – Trade Republic verzinst Guthaben in der Regel mit diesem Satz."""
+    return await _ecb(session, ECB_DFR_FLOW, 5)
 
 
 async def fetch_unemployment(session: aiohttp.ClientSession, api_key: str | None = None) -> list[list]:
@@ -137,4 +143,5 @@ FETCHERS = {
     "unemployment": fetch_unemployment,
     "claims": fetch_claims,
     "yield_curve": fetch_yield_curve,
+    "ecb_rate": fetch_ecb_rate,
 }
