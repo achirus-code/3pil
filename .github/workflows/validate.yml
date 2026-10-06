@@ -27,8 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Image so bauen, wie es der Supervisor tut (amd64)
-        run: docker build --build-arg BUILD_FROM=python:3.12-slim -t saeulenwaechter:test saeulenwaechter
+      - name: Image so bauen, wie es der Supervisor tut (amd64, mit seinem Standard-BUILD_FROM)
+        run: docker build --platform linux/amd64 --build-arg BUILD_FROM=ghcr.io/home-assistant/base:latest -t saeulenwaechter:test saeulenwaechter
       - name: App startet und antwortet
         run: |
           mkdir -p /tmp/sw && echo '{"total": 100000, "notify": false, "use_depot": false}' > /tmp/sw/options.json
