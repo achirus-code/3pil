@@ -446,16 +446,20 @@ class TradeRepublic:
                 prev = positions[isin]
                 total = prev["size"] + size
                 known = avg is not None and prev["avg_buy"] is not None and total
-                positions[isin] = {"size": total,
+                positions[isin] = {**prev, "size": total,
                                    "avg_buy": (prev["avg_buy"] * prev["size"] + avg * size) / total if known else None}
             else:
                 positions[isin] = {"size": size, "avg_buy": avg}
             # Was Trade Republic selbst als Gewinn seit Kauf zeigt (falls mitgeliefert) – zum Abgleich
+            net = _f(_amount(p.get("netValue")))
+            if net is not None:  # Wert laut Trade Republic
+                positions[isin]["tr_value"] = (positions[isin].get("tr_value") or 0) + net
             perf = _f(_amount(p.get("performanceSinceBuyAbsolute")))
             if perf is not None:
                 positions[isin]["tr_pnl"] = (positions[isin].get("tr_pnl") or 0) + perf
         for isin, pos in positions.items():
-            _LOGGER.info("TR-Position %s: %s Stück, Kaufkurs Ø %s", isin, pos["size"], pos["avg_buy"])
+            _LOGGER.info("TR-Position %s: %s Stück, Kaufkurs Ø %s, Wert laut TR %s", isin, pos["size"],
+                         pos["avg_buy"], pos.get("tr_value"))
         cash_eur = None
         if not isinstance(cash, Exception) and isinstance(cash, list):
             for c in cash:

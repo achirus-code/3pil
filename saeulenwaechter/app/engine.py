@@ -596,6 +596,13 @@ class Engine:
         empty = [k for k in pillars if not holdings.get(k)]
         empty_soll = sum(amounts[k] for k in empty) or 1
         depot_cash = depot.get("cash") or 0.0
+        # Echtes Depot: Säulenbeträge immer als Anteil am tatsächlichen Depot (40/30/30 vom Ist-Gesamtwert),
+        # der eingestellte Gesamtbetrag zählt nur für das Papierdepot.
+        base = dict(amounts)
+        if mode == "depot":
+            depot_total = depot_cash + sum(h.get("value") or 0 for hs in holdings.values() for h in hs)
+            weight_sum = sum(amounts.values()) or 1
+            base = {k: depot_total * amounts[k] / weight_sum for k in amounts}
         for key, p in pillars.items():
             cfg, res, st = p["cfg"], p["res"], p["st"]
             held = holdings.get(key, [])
@@ -610,7 +617,8 @@ class Engine:
             tradable = [h for h in held if not h.get("physical")]
             physical_value = sum(h.get("value") or 0 for h in held if h.get("physical"))
             # Kaufbetrag: was das physische Gold nicht schon abdeckt
-            buy_budget = max((st.get("proceeds") or amounts[key]) - physical_value, 0.0)
+            buy_budget = max((base[key] if mode == "depot" else (st.get("proceeds") or amounts[key]))
+                             - physical_value, 0.0)
             action = S.plan_action([h.get("counts_as") or h["isin"] for h in tradable], target) \
                 if st.get("month") else None
             if action == "buy" and buy_budget < 2 * ORDER_FEE:
@@ -653,7 +661,7 @@ class Engine:
                 "physical_value": physical_value or None,
                 "buy_budget": buy_budget,
                 "value": value,
-                "amount": amounts[key],
+                "amount": round(base[key], 2),
                 "proceeds": st.get("proceeds"),
                 "action": action,
                 "action_label": ACTION_LABELS.get(action, "–") if action else "–",
@@ -731,6 +739,7 @@ class Engine:
                 "unassigned": unassigned,
             },
             "tr_split": split,
+            "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
             "market_error": market.get("_error"),
             "macro_status": {k: {"ok_at": v.get("ok_at"), "error": v.get("error")}
                              for k, v in self.state["macro"].items()},
@@ -799,6 +808,8 @@ class Engine:
         unassigned: list[dict] = []
         for isin, pos in (depot.get("positions") or {}).items():
             bid = self._price(isin).get("bid")
+            if pos.get("tr_value") and pos.get("size"):
+                bid = pos["tr_value"] / pos["size"]  # Kurs so, wie Trade Republic die Position bewertet
             counts_as = S.resolve_isin(isin, PILLARS, extras)
             claim: list[str] = []
             if counts_as:
@@ -838,6 +849,23 @@ class Engine:
                     "value": size * bid if bid else None,
                 })
         return out, unassigned
+
+    @staticmethod
+    def _reconcile(depot: dict, holdings: dict, unassigned: list[dict]) -> dict | None:
+        """Abgleich mit Trade Republic: was TR zeigt und was davon in den Säulen zählt."""
+        if not depot.get("connected"):
+            return None
+        tr_values = [p.get("tr_value") for p in (depot.get("positions") or {}).values()]
+        counted = sum(h.get("value") or 0 for hs in holdings.values() for h in hs if not h.get("physical"))
+        missing_price = [u["isin"] for u in unassigned if u.get("value") is None] + \
+            [h["isin"] for hs in holdings.values() for h in hs if h.get("value") is None]
+        return {
+            "tr_positions": round(sum(tr_values), 2) if tr_values and all(v is not None for v in tr_values) else None,
+            "cash": depot.get("cash"),
+            "counted": round(counted, 2),
+            "unassigned": round(sum(u.get("value") or 0 for u in unassigned), 2),
+            "missing_price": missing_price,
+        }
 
     def _paper_holdings(self, pillars: dict) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}

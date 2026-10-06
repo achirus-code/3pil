@@ -497,8 +497,9 @@ def pillars_overview(values: dict[str, float], amounts: dict[str, float]) -> dic
         drift = max(drift, abs(diff_pp))
         rows.append({"key": key, "value": value, "amount": amount, "soll": soll, "ist": ist,
                      "diff_pp": diff_pp, "target_value": soll * total_value})
-    due = drift >= DRIFT_THRESHOLD_PP
-    return {"rows": rows, "total": total_value, "drift_pp": drift, "due": due}
+    # Kleine Abweichungen bis ±5 Pp sind normal (Kurse schwanken) – sie zeigen nur die Balken, angeglichen wird erst darüber
+    due = round(drift, 6) > DRIFT_THRESHOLD_PP
+    return {"rows": rows, "total": total_value, "drift_pp": drift, "due": due, "tolerance_pp": DRIFT_THRESHOLD_PP}
 
 
 # ---------------------------------------------------------------------------

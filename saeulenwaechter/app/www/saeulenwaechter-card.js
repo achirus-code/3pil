@@ -84,7 +84,9 @@ const STYLE = `
   .interest .muted { opacity:.7; }
   .alarm-table { width:100%; margin-top:8px; border-collapse:collapse; font-size:14px; }
   .alarm-table th { text-align:left; font-size:11px; text-transform:uppercase; opacity:.85; padding:4px 6px; }
-  .alarm-table td { padding:6px; border-top:1px solid rgba(255,255,255,.25); white-space:nowrap; }
+  .alarm-row { overflow-x:auto; }
+  .alarm-table td { padding:6px 4px; border-top:1px solid rgba(255,255,255,.25); white-space:nowrap; }
+  .alarm-table .mv { white-space:normal; }
   .alarm-table .num { text-align:right; }
   .alarm-table .mv { font-weight:800; }
   .alarm-foot { margin-top:10px; font-size:12px; opacity:.9; }
@@ -235,7 +237,7 @@ class SaeulenBase extends HTMLElement {
     const t = key === "cash" ? split.cash : (split.rows || []).find((x) => x.key === key);
     if (!t) return "";
     const diff = (t.ist - t.soll) * 100;
-    const warn = Math.abs(diff) >= 5;
+    const warn = Math.abs(diff) > 5;
     // mehrere Produkte einer Säule: je ein Abschnitt, abgestuft eingefärbt
     const parts = t.parts && t.parts.length > 1 ? t.parts : null;
     let left = 0;
@@ -278,6 +280,16 @@ class SaeulenBase extends HTMLElement {
         ${t.rows ? this.rebalanceTable(t.rows) : `<div class="alarm-text">${esc(t.text)}</div>`}</div>`).join("")}
       <div class="alarm-foot">Bitte bei Trade Republic umsetzen – die Meldung verschwindet, sobald das Depot zum Ziel passt.</div>
     </div>`;
+  }
+
+  reconcileLine(r) {
+    if (!r) return "";
+    const parts = [`in den Säulen ${eur(r.counted, 0)}`, `Cash ${eur(r.cash || 0, 0)}`];
+    if (r.unassigned) parts.push(`<b>nicht zugeordnet ${eur(r.unassigned, 0)}</b> (zählt nicht mit)`);
+    const tr = r.tr_positions != null
+      ? `Trade Republic: Wertpapiere ${eur(r.tr_positions, 0)} + Cash ${eur(r.cash || 0, 0)} = <b>${eur(r.tr_positions + (r.cash || 0), 0)}</b> · ` : "";
+    const miss = r.missing_price && r.missing_price.length ? ` · ohne Kurs: ${r.missing_price.map(esc).join(", ")}` : "";
+    return `<div class="note">${tr}App: ${parts.join(" · ")}${miss}</div>`;
   }
 
   interestLine(z) {
@@ -324,6 +336,7 @@ class SaeulenBase extends HTMLElement {
       <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th></tr>
         ${st.rows.map(row).join("")}</table>
       ${this.interestLine(st.interest)}
+      ${this.reconcileLine(d.reconcile)}
       <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
       ${this.history(d)}
     </div>`;
@@ -361,7 +374,7 @@ class SaeulenBase extends HTMLElement {
   pillars(d, active) {
     const ov = d.overview;
     const rows = ov.rows.map((r) => {
-      const warn = Math.abs(r.diff_pp) >= 5;
+      const warn = Math.abs(r.diff_pp) > (ov.tolerance_pp || 5);
       const isActive = r.key === active;
       return `<div class="pillar">
         <div class="head"><span>${isActive ? `<b>${esc(r.name)}</b>` : esc(r.name)}</span>
@@ -375,7 +388,9 @@ class SaeulenBase extends HTMLElement {
     const note = ov.due
       ? `<div class="note warn">Um ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp von den Soll-Anteilen abgewichen – die Beträge nach dem Pfeil stellen sie wieder her.</div>
          <div class="buttons" style="margin-top:8px"><button class="sw" data-action="rebalance">Angleichung übernehmen</button></div>`
-      : `<div class="note">Nahe an den Soll-Anteilen (Ist / Soll) – einmal im Jahr angleichen.</div>`;
+      : ov.drift_pp >= 0.5
+        ? `<div class="note">Kleine Abweichung (höchstens ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp) – im Rahmen von ±${ov.tolerance_pp || 5} Pp, kein Handlungsbedarf. Angeglichen wird erst darüber oder einmal im Jahr.</div>`
+        : `<div class="note">Nahe an den Soll-Anteilen (Ist / Soll) – einmal im Jahr angleichen.</div>`;
     return `<div class="section"><div class="label">Säulen · ${eur(ov.total, 0)}</div>${rows}${note}</div>`;
   }
 

@@ -261,3 +261,11 @@ def test_record_history_one_entry_per_day_and_capped():
         h = S.record_history(h, day, stats, "depot", max_days=2)
     assert [x["date"] for x in h] == ["2026-10-07", "2026-10-08"]
     assert h[-1]["pillars"] == {"welt": 60.0, "gold": 40.0}
+
+
+def test_small_drift_within_tolerance_is_not_due():
+    amounts = {"welt": 40000, "gold": 30000, "anleihen": 30000}
+    ov = S.pillars_overview({"welt": 45000, "gold": 25000, "anleihen": 30000}, amounts)  # genau 5 Pp
+    assert ov["drift_pp"] == pytest.approx(5.0) and not ov["due"] and ov["tolerance_pp"] == 5.0
+    ov = S.pillars_overview({"welt": 45200, "gold": 24800, "anleihen": 30000}, amounts)  # 5,2 Pp
+    assert ov["due"]
