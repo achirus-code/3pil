@@ -119,6 +119,7 @@ const STYLE = `
               color:var(--primary-text-color); }
   button.sw:hover { border-color: var(--primary-color); }
   .err { color: var(--sw-red); font-size:12px; }
+  .log-box { max-height:220px; overflow-y:auto; border:1px solid var(--divider-color); border-radius:8px; padding:6px 8px; }
   .log { font-size:11.5px; white-space:pre-wrap; color:var(--secondary-text-color); border-left:3px solid var(--divider-color);
          padding-left:8px; margin:6px 0; }
 `;
@@ -386,8 +387,8 @@ class SaeulenBase extends HTMLElement {
       </div>`;
     }).join("") + this.trExtra(d);
     const note = ov.due
-      ? `<div class="note warn">Um ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp von den Soll-Anteilen abgewichen – die Beträge nach dem Pfeil stellen sie wieder her.</div>
-         <div class="buttons" style="margin-top:8px"><button class="sw" data-action="rebalance">Angleichung übernehmen</button></div>`
+      ? `<div class="note warn">Um ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp von den Soll-Anteilen abgewichen – die Beträge nach dem Pfeil stellen sie wieder her${d.mode === "paper" ? "" : "; bei Trade Republic umsetzen, die Meldung verschwindet dann von selbst"}.</div>
+         ${d.mode === "paper" ? `<div class="buttons" style="margin-top:8px"><button class="sw" data-action="rebalance">Angleichung übernehmen</button></div>` : ""}`
       : ov.drift_pp >= 0.5
         ? `<div class="note">Kleine Abweichung (höchstens ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp) – im Rahmen von ±${ov.tolerance_pp || 5} Pp, kein Handlungsbedarf. Angeglichen wird erst darüber oder einmal im Jahr.</div>`
         : `<div class="note">Nahe an den Soll-Anteilen (Ist / Soll) – einmal im Jahr angleichen.</div>`;
@@ -496,7 +497,7 @@ class SaeulenwaechterPanel extends SaeulenBase {
                 <button class="sw" data-action="test">WhatsApp-Test</button>
               </div>
             </ha-card>
-            <ha-card style="margin-top:16px"><div class="section"><div class="label">Letzte Meldungen</div>${log}</div></ha-card>
+            <ha-card style="margin-top:16px"><div class="section"><div class="label">Letzte Meldungen</div><div class="log-box">${log}</div></div></ha-card>
           </div>
           <div>
             <div class="buttons" style="margin-bottom:12px">${tabs}</div>

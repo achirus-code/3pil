@@ -1114,8 +1114,12 @@ class Engine:
     # ------------------------------------------------------------ Aktionen
 
     async def apply_rebalance(self) -> None:
-        """Übernimmt die angeglichenen Beträge (Soll % · Σ Werte)."""
-        if not self.data:
+        """Papierdepot: teilt das Papierkapital neu auf (Soll % · Σ Werte).
+
+        Im echten Depot ohne Wirkung – dort gilt immer 40/30/30 vom tatsächlichen Depotwert, angeglichen wird bei
+        Trade Republic.
+        """
+        if not self.data or self.data.get("mode") != "paper":
             return
         amounts = {r["key"]: round(r["target_value"], 2) for r in self.data["overview"]["rows"]}
         async with self._lock:

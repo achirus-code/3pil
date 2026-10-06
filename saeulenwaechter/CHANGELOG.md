@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.2
+
+- Letzte Meldungen in einem kleinen Fenster zum Scrollen.
+- „Angleichung übernehmen“ nur noch im Papierdepot; im echten Depot wird bei Trade Republic angeglichen.
+
 ## 2.2.1
 
 - Echtes Depot: Beträge und Kaufbudgets immer als 40/30/30 vom tatsächlichen Depotwert; der eingestellte Gesamtbetrag gilt nur noch für das Papierdepot.
