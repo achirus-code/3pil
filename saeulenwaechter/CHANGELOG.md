@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.5.1
+
+- Zinszeile ohne den Zusatz zum EZB-Einlagensatz.
+
 ## 2.5.0
 
 - Rechte Spalte zeigt im echten Depot die gekauften Produkte statt des Referenz-Instruments (z. B. Invesco Physical Gold statt Xetra-Gold), bei mehreren Produkten einer Säule (zwei IMI-ETFs) alle mit Kurs und Tagesänderung. Das Signal kommt weiter vom Referenz-Instrument.

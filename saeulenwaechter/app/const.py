@@ -5,7 +5,7 @@ from __future__ import annotations
 DOMAIN = "saeulenwaechter"
 ENTITY_PREFIX = "saeulenwaechter"
 NAME = "Säulenwächter"
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 
 # Config-Entry-Daten
 CONF_USE_DEPOT = "use_depot"
