@@ -301,6 +301,9 @@ class TradeRepublic:
         """
         items: list[dict] = []
         after = None
+        self.last_timeline = diag = {"pages": 0, "items": 0, "with_isin": 0, "held": 0, "skipped": 0,
+                                     "details": 0, "with_shares": 0, "estimated": 0, "error": None,
+                                     "item_keys": [], "subtitles": [], "detail_titles": []}
         for _ in range(max_pages):
             payload = {"type": "timelineTransactions"}
             if after:
@@ -309,21 +312,34 @@ class TradeRepublic:
             if isinstance(page, TRAuthError):
                 raise page
             if isinstance(page, Exception) or not isinstance(page, dict):
+                diag["error"] = str(page)[:300] if isinstance(page, Exception) else f"Antwort: {type(page).__name__}"
                 break
+            diag["pages"] += 1
             items.extend(page.get("items") or [])
             after = (page.get("cursors") or {}).get("after")
             if not after:
                 break
+        diag["items"] = len(items)
+        if items:
+            diag["item_keys"] = sorted({k for it in items[:50] for k in it})[:30]
         trades = []
         for it in items:
-            isin = _isin_from_icon(it.get("icon"))
+            isin = _isin_from_icon(it.get("icon")) or _isin_from_icon(it.get("action")) \
+                or _isin_from_icon(it.get("instrumentId") or it.get("isin"))
+            if isin:
+                diag["with_isin"] += 1
             if not isin or (isins is not None and isin not in isins):
                 continue
+            diag["held"] += 1
+            sub = str(it.get("subtitle") or "")
+            if sub and sub not in diag["subtitles"] and len(diag["subtitles"]) < 15:
+                diag["subtitles"].append(sub)
             if str(it.get("status") or "").upper() in ("CANCELED", "CANCELLED", "FAILED", "PENDING", "REJECTED"):
                 continue
             # Dividenden, Ausschüttungen, Zinsen, Steuern sind keine Käufe/Verkäufe (tragen aber dieselbe ISIN)
             label = f"{it.get('subtitle') or ''} {it.get('eventType') or it.get('type') or ''}".lower()
             if it.get("dividend") or any(w in label for w in NOT_TRADES):
+                diag["skipped"] += 1
                 continue
             try:
                 when = datetime.fromisoformat(str(it["timestamp"]).replace("Z", "+00:00"))
@@ -343,6 +359,11 @@ class TradeRepublic:
                     raise detail
                 if isinstance(detail, Exception):
                     continue
+                diag["details"] += 1
+                if len(diag["detail_titles"]) < 25:
+                    for title in _titles(detail):
+                        if title not in diag["detail_titles"] and len(diag["detail_titles"]) < 25:
+                            diag["detail_titles"].append(title)
                 if any(w in json.dumps(detail, ensure_ascii=False).lower() for w in ("dividende", "ausschüttung")):
                     t["skip"] = True
                     continue
@@ -353,8 +374,25 @@ class TradeRepublic:
                     t["shares"] = -abs(shares) if sell else abs(shares)
                     if t["amount"] is not None:  # Vorzeichen wie bei TR: Kauf = Geld raus (−), Verkauf = Geld rein (+)
                         t["amount"] = abs(t["amount"]) if sell else -abs(t["amount"])
-        # nur echte Käufe/Verkäufe mit Stückzahl – ohne Stückzahl lässt sich nichts sicher zuordnen
-        trades = [t for t in trades if t["shares"] and not t.pop("skip", False)]
+        # Ohne Stückzahl: nur eindeutige Käufe/Verkäufe (Order, Sparplan, Saveback, Round-up) behalten –
+        # die Stückzahl schätzt die Engine dann aus Betrag und Tageskurs
+        kept = []
+        for t in trades:
+            if t.pop("skip", False):
+                continue
+            if t["shares"]:
+                diag["with_shares"] += 1
+                kept.append(t)
+                continue
+            text = f"{t['subtitle'] or ''} {t['type'] or ''}".lower()
+            if t["amount"] and any(w in text for w in TRADE_WORDS):
+                sell = "verkauf" in text or "sell" in text
+                t["amount"] = abs(t["amount"]) if sell else -abs(t["amount"])
+                t["estimated"] = True
+                diag["estimated"] += 1
+                kept.append(t)
+        trades = kept
+        _LOGGER.info("TR-Zeitleiste: %s", {k: v for k, v in diag.items()})
         for t in trades:
             _LOGGER.info("TR-Transaktion %s %s: %s %s Stück, %s €", t["date"], t["isin"], t["subtitle"] or t["type"],
                          t["shares"], t["amount"])
@@ -545,6 +583,8 @@ class TradeRepublic:
 
 
 ICON_ISIN = re.compile(r"([A-Z]{2}[A-Z0-9]{9}[0-9])")
+TRADE_WORDS = ("kauf", "order", "sparplan", "savings", "saveback", "round", "spare", "trade", "buy", "sell",
+               "ausgeführt", "executed")
 NOT_TRADES = ("dividend", "ausschüttung", "ausschuettung", "zinsen", "interest", "steuer", "tax", "coupon", "kupon",
               "ertrag", "distribution", "corporate_action", "kapitalmaßnahme")
 SHARE_TITLES = ("aktien", "anteile", "stück", "stueck", "shares", "anzahl", "menge")
@@ -570,15 +610,33 @@ def _de_number(text: Any) -> float | None:
         return None
 
 
+def _titles(body: Any, depth: int = 0) -> list[str]:
+    """Alle „title“-Texte einer Antwort (für die Diagnose, ohne Beträge)."""
+    out: list[str] = []
+    if depth > 8:
+        return out
+    if isinstance(body, dict):
+        if isinstance(body.get("title"), str):
+            out.append(body["title"][:40])
+        for v in body.values():
+            if isinstance(v, (dict, list)):
+                out.extend(_titles(v, depth + 1))
+    elif isinstance(body, list):
+        for v in body:
+            out.extend(_titles(v, depth + 1))
+    return out
+
+
 def find_shares(body: Any, depth: int = 0) -> float | None:
     """Stückzahl aus den Details einer Transaktion: ein Eintrag mit Titel „Aktien“/„Anteile“/„Stück“."""
     if depth > 8:
         return None
     if isinstance(body, dict):
         title = str(body.get("title") or "").strip().lower()
-        if title in SHARE_TITLES:
+        if title in SHARE_TITLES or title.startswith(("anteil", "aktie", "stück")):
             det = body.get("detail")
-            value = det.get("text") if isinstance(det, dict) else det
+            value = det if not isinstance(det, dict) else (
+                det.get("text") or (det.get("displayValue") or {}).get("text") or det.get("value"))
             n = _de_number(value)
             if n:
                 return n

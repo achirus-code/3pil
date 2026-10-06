@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.10.1
+
+- Diagnose der Zeitleiste im Popup „Wertentwicklung“ (aufklappbar, ohne Beträge): Seiten, Einträge, Einträge mit ISIN, eigene Positionen, Stückzahlen, Fehler.
+- Käufe/Verkäufe ohne Stückzahl in den Details (Order, Sparplan, Saveback, Round-up) werden behalten; die Stückzahl wird aus Betrag und Tageskurs geschätzt.
+- Stückzahl wird in mehr Antwortformen erkannt.
+
 ## 2.10.0
 
 - Wertentwicklung im Popup (kleiner Button „📈 Wertentwicklung“ in der Statistik).

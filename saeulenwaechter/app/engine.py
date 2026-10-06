@@ -508,11 +508,13 @@ class Engine:
             trades = await self.tr.transactions(isins=set(p["positions"]))
             # jedes Mal komplett neu (frühere Fehldeutungen, z. B. Dividenden, fallen so wieder heraus)
             self.state["trades"] = sorted(trades, key=lambda t: t["time"])
+            self.state["timeline_diag"] = getattr(self.tr, "last_timeline", None)
             self.state["trades_at"] = self.now().isoformat()
         except TRAuthError:
             raise
         except Exception as err:  # noqa: BLE001
-            _LOGGER.info("TR-Transaktionen nicht geladen: %s", err)
+            _LOGGER.warning("TR-Transaktionen nicht geladen: %s", err)
+            self.state["timeline_diag"] = {**(getattr(self.tr, "last_timeline", None) or {}), "error": str(err)[:300]}
         try:  # Zinssatz auf das Guthaben – bei jedem Abgleich neu
             rate = await self.tr.interest()
             if rate is not None:
@@ -1079,6 +1081,7 @@ class Engine:
         complete = all(c["complete"] for c in coverage)
         return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events, "cash": cash_series,
                 "history": all(ln["known"] for ln in lines), "complete": complete, "coverage": coverage,
+                "diag": self.state.get("timeline_diag") if mode == "depot" else None,
                 "synced_trades_at": self.state.get("trades_at") if mode == "depot" else None}
 
     @staticmethod
