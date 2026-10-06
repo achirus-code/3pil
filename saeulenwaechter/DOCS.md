@@ -52,3 +52,16 @@ Minute erneuert.
 - Die Oberfläche ist nur über Home Assistant (Ingress) erreichbar.
 - Die Trade-Republic-API ist inoffiziell und kann sich ändern. Der Säulenwächter liest nur und handelt nie selbst.
 - Keine Anlageberatung.
+
+## WhatsApp über Home Assistant (optional)
+
+Statt oder zusätzlich zu CallMeBot kann der Säulenwächter jeden Dienst in Home Assistant aufrufen:
+
+- **WhatsApp for Home Assistant** (https://faserf.github.io/ha-whatsapp/): App und Integration installieren,
+  mit dem Handy koppeln, dann in den Optionen `ha_service: whatsapp.send_message` und als Empfänger
+  `ha_target` die eigene Nummer ohne `+` (z. B. `49171…`) eintragen. Achtung: inoffiziell – WhatsApp kann die
+  gekoppelte Nummer sperren; am besten eine Zweitnummer verwenden.
+- **Home-Assistant-App:** `ha_service: notify.mobile_app_<handy>`, Empfänger leer lassen.
+- **Telegram:** `ha_service: telegram_bot.send_message`, Empfänger = Chat-ID.
+
+Mit „WhatsApp-Test“ in der Oberfläche prüfen.

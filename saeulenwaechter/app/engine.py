@@ -21,6 +21,8 @@ from .const import (
     CONF_BLS_KEY,
     CONF_CASH_RATE,
     CONF_CASH_RESERVE,
+    CONF_HA_SERVICE,
+    CONF_HA_TARGET,
     CONF_EXTRA_ISINS,
     CONF_MONTHLY_REPORT,
     CONF_NOTIFY,
@@ -52,7 +54,7 @@ from .const import (
     TZ,
 )
 from .macro import FETCHERS
-from .notify import send_whatsapp
+from .notify import send_ha_service, send_whatsapp
 from .tr_api import TRAuthError, TRError, TradeRepublic
 
 _LOGGER = logging.getLogger(__name__)
@@ -1145,13 +1147,19 @@ class Engine:
         if not (force or opts.get(CONF_NOTIFY, True)):
             return False
         phone, apikey = opts.get(CONF_WA_PHONE), opts.get(CONF_WA_APIKEY)
-        if not phone or not apikey:
-            _LOGGER.info("WhatsApp nicht eingerichtet – Nachricht verworfen:\n%s", body)
+        service = (opts.get(CONF_HA_SERVICE) or "").strip()
+        if not (phone and apikey) and not service:
+            _LOGGER.info("Keine Benachrichtigung eingerichtet – Nachricht verworfen:\n%s", body)
             return False
         text = body if body.startswith("🏛️") else f"🏛️ *{NAME}*\n\n{body}"
         self.state.setdefault("log", []).append({"time": self.now().isoformat(), "text": text})
         self.state["log"] = self.state["log"][-30:]
-        return await send_whatsapp(self._http, phone, apikey, text)
+        results = []
+        if service:  # z. B. WhatsApp über ha-whatsapp, die Home-Assistant-App oder Telegram
+            results.append(await send_ha_service(self._http, service, opts.get(CONF_HA_TARGET), text))
+        if phone and apikey:
+            results.append(await send_whatsapp(self._http, phone, apikey, text))
+        return any(results)
 
     # ------------------------------------------------------------ Aktionen
 

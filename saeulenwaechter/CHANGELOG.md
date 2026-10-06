@@ -2,6 +2,7 @@
 
 ## 2.6.0
 
+- Benachrichtigungen auch über einen Dienst in Home Assistant (Optionen „Benachrichtigungsdienst“ und „Empfänger“), z. B. whatsapp.send_message von „WhatsApp for Home Assistant“, die Home-Assistant-App oder Telegram – zusätzlich zu oder statt CallMeBot.
 - Statistik zeigt den Gewinn von heute: gesamt (in € und %) und je Säule, aus der Tagesänderung der Positionen; physisches Gold mit der Änderung des Goldpreises.
 
 ## 2.5.2

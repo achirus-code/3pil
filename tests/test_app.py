@@ -500,3 +500,24 @@ async def test_cash_rate_falls_back_to_ecb_deposit_rate(make_engine):
     d = await eng.refresh()
     z = d["stats"]["interest"]
     assert z["source"] == "ezb" and z["rate"] == pytest.approx(0.02) and z["at"] == "2026-10-05"
+
+
+async def test_ha_service_notification(aiohttp_client):
+    """Meldungen über einen Dienst in Home Assistant (z. B. ha-whatsapp)."""
+    from sw.notify import send_ha_service
+    calls = []
+
+    async def service(request):
+        calls.append((request.match_info["domain"], request.match_info["name"],
+                      request.headers.get("Authorization"), await request.json()))
+        return web.json_response([])
+
+    app = web.Application()
+    app.router.add_post("/core/api/services/{domain}/{name}", service)
+    client = await aiohttp_client(app)
+    url = str(client.make_url("/core/api"))
+    assert await send_ha_service(client.session, "whatsapp.send_message", "+49 171 1234567", "Hallo", "t", url)
+    assert calls[-1] == ("whatsapp", "send_message", "Bearer t", {"message": "Hallo", "target": "491711234567"})
+    assert await send_ha_service(client.session, "notify.mobile_app_handy", None, "Hallo", "t", url)
+    assert calls[-1][3] == {"message": "Hallo", "title": "Säulenwächter"}
+    assert not await send_ha_service(client.session, "kaputt", None, "x", "t", url)

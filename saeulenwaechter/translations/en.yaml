@@ -37,3 +37,9 @@ configuration:
   cash_reserve:
     name: Cash reserve outside the strategy (€)
     description: This part of your Trade Republic cash does not count towards the strategy (e.g. emergency fund). 0 = all cash belongs to the strategy.
+  ha_service:
+    name: Notification service in Home Assistant (optional)
+    description: "In addition to or instead of CallMeBot, e.g. whatsapp.send_message (WhatsApp for Home Assistant), notify.mobile_app_<phone> (Home Assistant app) or telegram_bot.send_message."
+  ha_target:
+    name: Recipient for the service (optional)
+    description: "For whatsapp.send_message the number without + (e.g. 49171…) or a group ID; usually empty for notify."

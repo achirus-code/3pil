@@ -37,3 +37,9 @@ configuration:
   cash_reserve:
     name: Cash-Reserve außerhalb der Strategie (€)
     description: Dieser Teil des Guthabens bei Trade Republic zählt nicht zur Strategie (z. B. Notgroschen). 0 = alles Cash gehört zur Strategie.
+  ha_service:
+    name: Benachrichtigungsdienst in Home Assistant (optional)
+    description: "Zusätzlich oder statt CallMeBot, z. B. whatsapp.send_message (WhatsApp for Home Assistant), notify.mobile_app_<handy> (Home-Assistant-App) oder telegram_bot.send_message."
+  ha_target:
+    name: Empfänger für den Dienst (optional)
+    description: "Bei whatsapp.send_message die Nummer ohne + (z. B. 49171…) oder eine Gruppen-ID; bei notify meist leer lassen."

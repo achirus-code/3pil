@@ -26,6 +26,8 @@ options:
   bls_key: ""
   cash_zins: ""
   cash_reserve: 0
+  ha_service: ""
+  ha_target: ""
 schema:
   total: float(100,)
   wa_phone: str?
@@ -41,3 +43,5 @@ schema:
   bls_key: password?
   cash_zins: str?
   cash_reserve: float(0,)
+  ha_service: str?
+  ha_target: str?
