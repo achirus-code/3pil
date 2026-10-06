@@ -159,7 +159,7 @@ def _qr_response(status: dict) -> web.Response:
     payload = out.pop("payload", None)
     if payload:
         # als SVG vom Server: die Seite braucht keine fremde QR-Bibliothek
-        out["svg"] = segno.make(payload, error="m").svg_inline(scale=6, border=2, dark="#000", light="#fff")
+        out["svg"] = segno.make(payload, error="m").svg_inline(border=4, omitsize=True, dark="#000", light="#fff")
     return _no_cache(web.json_response(out))
 
 

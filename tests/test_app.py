@@ -472,7 +472,7 @@ async def test_web_qr_login(make_engine, aiohttp_client, monkeypatch):
         monkeypatch.setattr(TradeRepublic, name, fn)
     client = await aiohttp_client(make_app(eng, allowed=()))
     r = await (await client.post("/api/login/qr", json={})).json()
-    assert r["status"] == "pending" and r["svg"].startswith("<svg")
+    assert r["status"] == "pending" and r["svg"].startswith("<svg viewBox=")  # skaliert ohne Verzerrung
     r = await (await client.get("/api/login/qr")).json()
     assert r["status"] == "claimed"
     await eng._qr["task"]
