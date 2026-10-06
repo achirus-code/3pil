@@ -45,6 +45,10 @@ const STYLE = `
   .hero .sub { font-size:12px; opacity:.85; margin-top:2px; }
   .hero .price { font-size:22px; font-weight:600; margin-top:8px; }
   .hero .status { font-size:12.5px; margin-top:6px; display:flex; gap:6px; align-items:flex-start; }
+  .hero .prices { margin:6px 0 2px; font-size:14px; line-height:1.5; }
+  .hero .prices b { font-size:17px; }
+  .hero .prices > div { display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px; }
+  .hero .prices > div > span:first-child { flex:1; min-width:0; }
   .badge { font-size:10px; font-weight:700; padding:2px 6px; border-radius:6px; background:rgba(255,255,255,.25); letter-spacing:.04em; }
   .dot { width:8px; height:8px; border-radius:50%; flex:none; margin-top:5px; }
   .row { display:flex; gap:8px; align-items:flex-start; padding:5px 0; }
@@ -178,13 +182,25 @@ class SaeulenBase extends HTMLElement {
 
   hero(p, d) {
     const live = p.state && p.live_state && p.live_state !== p.state;
+    // Gekaufte Produkte statt des Referenz-Instruments; bei mehreren (z. B. zwei IMI-ETFs) alle
+    const held = d.mode === "depot" ? (p.held || []).filter((h) => !h.physical) : [];
+    const title = held.length ? held.map((h) => esc(h.name)).join(" + ") : esc(p.instrument);
+    const sub = held.length
+      ? `${esc(p.name)} · ${held.length === 1 ? esc(held[0].isin) : `${held.length} Produkte`} · Signal aus ${esc(p.instrument)}`
+      : `${esc(p.name)} · Monatlicher Trendfolger · ${esc(p.isin)}`;
+    const change = (c) => c != null ? `<span style="font-size:13px;font-weight:400;opacity:.85">${pct(c)} heute</span>` : "";
+    const price = held.length === 1
+      ? `<div class="price num">${eur(held[0].bid)} ${change(held[0].change_24h)}</div>`
+      : held.length > 1
+        ? `<div class="prices num">${held.map((h) => `<div><span>${esc(h.name)}</span> <b>${eur(h.bid)}</b> ${change(h.change_24h)}</div>`).join("")}</div>`
+        : `<div class="price num">${eur(p.price)} ${change(p.change_24h)}</div>`;
     return `
       <div class="hero" style="background:linear-gradient(135deg, ${esc(p.color)}, var(--sw-blue))">
         <div class="icon"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>
         <div style="flex:1;min-width:0">
-          <h2>${esc(p.instrument)} ${d.mode === "paper" ? '<span class="badge">PAPER</span>' : '<span class="badge">DEPOT</span>'}</h2>
-          <div class="sub">${esc(p.name)} · Monatlicher Trendfolger · ${esc(p.isin)}</div>
-          <div class="price num">${eur(p.price)} <span style="font-size:13px;font-weight:400;opacity:.85">${p.change_24h != null ? pct(p.change_24h) + " heute" : ""}</span></div>
+          <h2>${title} ${d.mode === "paper" ? '<span class="badge">PAPER</span>' : '<span class="badge">DEPOT</span>'}</h2>
+          <div class="sub">${sub}</div>
+          ${price}
           <div class="status"><span class="dot" style="background:#fff"></span><span>${esc(p.status)}</span></div>
           ${live ? `<div class="status" style="opacity:.85">Aktuelle Daten würden „${esc(MONTH_LABELS[p.live_state])}“ ergeben – entschieden wird am Monatsersten.</div>` : ""}
         </div>
