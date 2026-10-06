@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -41,7 +42,13 @@ LOGIN_ERRORS = {
     "TOO_MANY_REQUESTS": "Zu viele Versuche. Bitte kurz warten.",
     "VALIDATION_CODE_INVALID": "Der Code ist nicht korrekt.",
     "VALIDATION_CODE_ALREADY_USED": "Der Code wurde bereits verwendet.",
+    "CLIENT_VERSION_OUTDATED": "Trade Republic verlangt eine neuere Web-Version – bitte ein Update der App abwarten.",
+    "NUMBER_INVALID": "Die Telefonnummer ist ungültig.",
+    "LOGIN_NOT_ALLOWED": "Der Web-Login ist für dieses Konto nicht freigeschaltet.",
+    "WEBTRADING_NOT_AVAILABLE": "Der Web-Login ist für dieses Konto nicht freigeschaltet.",
 }
+# Antworten auf den Authenticator-Code, die „Code nicht angenommen“ bedeuten
+CODE_REJECTED = {"AUTHENTICATION_ERROR", "VALIDATION_CODE_INVALID", "INVALID_VALUE"}
 
 
 class TRError(Exception):
@@ -50,6 +57,14 @@ class TRError(Exception):
 
 class TRAuthError(TRError):
     """Login fehlt oder ist abgelaufen."""
+
+
+class TRCodeRequired(TRError):
+    """Trade Republic verlangt (noch) den Code aus der Authenticator-App."""
+
+
+class TRCodeRejected(TRError):
+    """Der Authenticator-Code wurde nicht angenommen – der Login-Vorgang bleibt offen, ein neuer Code geht."""
 
 
 class TradeRepublic:
@@ -111,12 +126,24 @@ class TradeRepublic:
             return resp.status, body
 
     @staticmethod
-    def _login_error(status: int, body: Any) -> TRError:
+    def _error_code(body: Any) -> tuple[str, str]:
+        """(errorCode, errorMessage) einer TR-Fehlerantwort ``{"errors": [{…}]}``."""
         try:
-            code = body["errors"][0]["errorCode"]
-        except (KeyError, IndexError, TypeError):
+            err = body["errors"][0]
+            return str(err.get("errorCode") or ""), str(err.get("errorMessage") or err.get("message") or "")
+        except (KeyError, IndexError, TypeError, AttributeError):
+            return "", ""
+
+    @classmethod
+    def _login_error(cls, status: int, body: Any, step: str = "login") -> TRError:
+        code, message = cls._error_code(body)
+        # Für die Fehlersuche: was Trade Republic geantwortet hat (ohne Nummer, PIN oder Code)
+        _LOGGER.warning("Trade-Republic-Login (%s): HTTP %s %s %s", step, status, code or "-", message[:200])
+        if status == 426:
+            return TRError(LOGIN_ERRORS["CLIENT_VERSION_OUTDATED"])
+        if not code:
             return TRError(f"Login fehlgeschlagen (HTTP {status}).")
-        return TRError(LOGIN_ERRORS.get(code, f"Login fehlgeschlagen: {code}"))
+        return TRError(LOGIN_ERRORS.get(code, f"Login fehlgeschlagen: {code}{' – ' + message if message else ''}"))
 
     # ----------------------------------------------------------------- Login
 
@@ -136,35 +163,53 @@ class TradeRepublic:
     async def _process(self) -> dict:
         status, body = await self._request("GET", f"/api/v2/auth/web/login/processes/{self._process_id}", login=True)
         if status >= 400:
-            raise self._login_error(status, body)
+            raise self._login_error(status, body, "Status")
         return body or {}
+
+    async def _wait_for_session(self, wait: float, code_sent: bool) -> None:
+        """Fragt den Login-Vorgang ab, bis Trade Republic die Session-Cookies setzt (wie die Web-App)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait
+        while not self.cookies.get("tr_session"):
+            process = await self._process()
+            st = process.get("status")
+            if process.get("requiredAction") == "AUTHENTICATOR_VERIFICATION" and st == "PENDING" and not code_sent:
+                self.required_action = "AUTHENTICATOR_VERIFICATION"
+                raise TRCodeRequired("Trade Republic verlangt den Code aus der Authenticator-App.")
+            if st not in (None, "PENDING", "CONFIRMED", "COMPLETED"):
+                raise TRError(f"Login abgelehnt (Status {st}).")
+            if self.cookies.get("tr_refresh") and not self.cookies.get("tr_session"):
+                # manche Antworten setzen nur tr_refresh – die Session holt der nächste Aufruf
+                try:
+                    await self.refresh_session()
+                except TRError:
+                    pass
+                if self.cookies.get("tr_session"):
+                    break
+            if loop.time() > deadline:
+                raise TRAuthError("Noch nicht in der Trade-Republic-App bestätigt.")
+            await asyncio.sleep(2)
 
     async def login_complete(self, code: str | None = None, wait: float = 20.0) -> None:
         """Schließt den Login ab: per Authenticator-Code oder Bestätigung in der TR-App."""
         if not self._process_id:
             raise TRError("Login wurde nicht gestartet.")
-        if self.required_action == "AUTHENTICATOR_VERIFICATION":
+        code_sent = False
+        if code is not None or self.required_action == "AUTHENTICATOR_VERIFICATION":
+            code = re.sub(r"\D", "", code or "")
+            if not 4 <= len(code) <= 8:
+                raise TRCodeRejected("Bitte den 6-stelligen Code aus der Authenticator-App eingeben.")
             status, body = await self._request(
                 "POST", f"/api/v2/auth/web/login/processes/{self._process_id}/authenticator-verification",
                 login=True, json={"code": code})
             if status >= 400:
-                raise self._login_error(status, body)
-        else:
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + wait
-            while True:
-                process = await self._process()
-                st = process.get("status")
-                if st in ("CONFIRMED", "COMPLETED"):
-                    break
-                if st != "PENDING":
-                    raise TRError(f"Unerwarteter Login-Status: {st}")
-                if loop.time() > deadline:
-                    raise TRAuthError("Noch nicht in der Trade-Republic-App bestätigt.")
-                await asyncio.sleep(2)
-        if not self.logged_in:
-            # Manche Antworten setzen die Session erst beim nächsten Aufruf
-            await self.refresh_session()
+                err = self._login_error(status, body, "Code")
+                if self._error_code(body)[0] in CODE_REJECTED or status in (400, 401):
+                    raise TRCodeRejected("Der Code wurde nicht angenommen (falsch oder schon abgelaufen). "
+                                         "Bitte den aktuellen Code aus der Authenticator-App eingeben.") from err
+                raise err
+            code_sent = True
+        await self._wait_for_session(wait, code_sent)
         await self.account()
 
     async def refresh_session(self) -> None:

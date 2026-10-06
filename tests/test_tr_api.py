@@ -38,3 +38,74 @@ async def test_portfolio_flat_fallback_and_unknown_average():
     tr = client(lambda p: [port, []])
     res = await tr.portfolio()
     assert res["positions"]["DE000A0S9GB0"] == {"size": 4.0, "avg_buy": None}
+
+
+# --- Web-Login --------------------------------------------------------------------------------
+
+from sw.tr_api import TRCodeRejected, TRCodeRequired  # noqa: E402
+
+
+def login_client(script):
+    """TR-Client, dessen HTTP-Aufrufe ein Skript beantwortet: {(method, path-suffix): [answers…]}."""
+    tr = TradeRepublic(session=None)
+    calls = []
+
+    async def request(method, path, *, login=False, **kw):
+        calls.append((method, path.rsplit("/", 1)[-1], kw.get("json")))
+        for (m, suffix), answers in script.items():
+            if m == method and path.endswith(suffix):
+                status, body, cookies = answers.pop(0) if len(answers) > 1 else answers[0]
+                tr.cookies.update(cookies)
+                return status, body
+        raise AssertionError(f"unerwartet: {method} {path}")
+
+    async def no_sleep(_):
+        return None
+
+    tr._request = request
+    return tr, calls, no_sleep
+
+
+async def test_rejected_code_can_be_retried_and_session_is_polled(monkeypatch):
+    import asyncio
+    tr, calls, no_sleep = login_client({
+        ("POST", "/api/v2/auth/web/login"): [(200, {"processId": "p1"}, {})],
+        ("POST", "/authenticator-verification"): [
+            (401, {"errors": [{"errorCode": "AUTHENTICATION_ERROR"}]}, {}),
+            (200, {}, {})],
+        ("GET", "/processes/p1"): [
+            (200, {"status": "PENDING", "requiredAction": "AUTHENTICATOR_VERIFICATION"}, {}),
+            (200, {"status": "PENDING"}, {}),
+            (200, {"status": "COMPLETED"}, {"tr_session": "s", "tr_refresh": "r"})],
+        ("GET", "/api/v2/auth/account"): [(200, {"securitiesAccountNumber": "42"}, {})],
+    })
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    assert await tr.login_start("+491701234567", "7391") == "AUTHENTICATOR_VERIFICATION"
+    with pytest.raises(TRCodeRejected, match="nicht angenommen"):
+        await tr.login_complete(code="123 456")
+    assert ("POST", "authenticator-verification", {"code": "123456"}) in calls  # Leerzeichen entfernt
+    await tr.login_complete(code="654321")  # gleicher Vorgang, neuer Code
+    assert tr.cookies["tr_session"] == "s" and tr.sec_acc_no == "42"
+
+
+async def test_short_code_is_refused_without_asking_trade_republic():
+    tr, calls, _ = login_client({})
+    tr._process_id, tr.required_action = "p1", "AUTHENTICATOR_VERIFICATION"
+    with pytest.raises(TRCodeRejected):
+        await tr.login_complete(code="12")
+    assert calls == []
+
+
+async def test_app_confirmation_switches_to_code_when_asked(monkeypatch):
+    import asyncio
+    tr, _, no_sleep = login_client({
+        ("POST", "/api/v2/auth/web/login"): [(200, {"processId": "p1"}, {})],
+        ("GET", "/processes/p1"): [
+            (200, {"status": "PENDING"}, {}),
+            (200, {"status": "PENDING", "requiredAction": "AUTHENTICATOR_VERIFICATION"}, {})],
+    })
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    assert await tr.login_start("+491701234567", "7391") == "APP_CONFIRMATION"
+    with pytest.raises(TRCodeRequired):
+        await tr.login_complete()
+    assert tr.required_action == "AUTHENTICATOR_VERIFICATION"

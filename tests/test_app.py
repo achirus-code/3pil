@@ -233,6 +233,17 @@ async def test_web_data_actions_and_login(make_engine, sent, aiohttp_client, mon
     assert eng.data["mode"] == "depot" and eng.state["cookies"]["tr_session"] == "s"
     assert '"7391"' not in json.dumps(eng.state) and "pin" not in eng.state  # die PIN wird nie gespeichert
 
+    # abgelehnter Authenticator-Code: Oberfläche bleibt im Code-Schritt
+    async def code_rejected(self, code=None, wait=20.0):
+        from sw.tr_api import TRCodeRejected
+        raise TRCodeRejected("Der Code wurde nicht angenommen")
+
+    monkeypatch.setattr(TradeRepublic, "login_complete", code_rejected)
+    await client.post("/api/login/start", json={"phone": "0170 1234567", "pin": "7391"})
+    r = await client.post("/api/login/complete", json={"code": "111111"})
+    assert r.status == 409 and (await r.json())["step"] == "code"
+    assert eng.login_status()["pending"]  # Vorgang bleibt offen, neuer Code möglich
+
     await client.post("/api/logout", json={})
     assert not (await (await client.get("/api/login")).json())["logged_in"]
     assert eng.data["mode"] == "paper"

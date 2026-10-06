@@ -10,7 +10,7 @@ import aiohttp
 from aiohttp import web
 
 from .engine import Engine
-from .tr_api import TRAuthError, TRError
+from .tr_api import TRAuthError, TRCodeRejected, TRCodeRequired, TRError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,6 +129,8 @@ async def login_complete(request: web.Request) -> web.Response:
     body = await _json(request)
     try:
         await request.app[ENGINE].login_complete(code=body.get("code") or None)
+    except (TRCodeRejected, TRCodeRequired) as err:
+        return web.json_response({"error": str(err), "step": "code"}, status=409)
     except TRAuthError:
         return _error("Noch nicht in der Trade-Republic-App bestätigt – bitte bestätigen und erneut absenden.", 409)
     except TRError as err:

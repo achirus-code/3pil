@@ -95,7 +95,7 @@
     const r = await fetch(path, body === undefined ? { cache: "no-store" } :
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    if (!r.ok) { const e = new Error(j.error || `HTTP ${r.status}`); e.step = j.step; throw e; }
     return j;
   }
   const hass = {
@@ -125,7 +125,10 @@
   }
   async function guarded(fn) {
     $("login-msg").textContent = "";
-    try { await fn(); } catch (e) { $("login-msg").textContent = e.message; }
+    try { await fn(); } catch (e) {
+      $("login-msg").textContent = e.message;
+      if (e.step === "code") { step("code"); $("code").value = ""; $("code").focus(); }
+    }
   }
   $("btn-login").onclick = () => { show("login", true); step("start"); $("phone").focus(); };
   $("btn-start").onclick = () => guarded(async () => {
@@ -134,7 +137,12 @@
     step(r.kind === "AUTHENTICATOR_VERIFICATION" ? "code" : "confirm");
   });
   const done = async () => { show("login", false); panel._load && panel._load(); await status(); };
-  $("btn-code").onclick = () => guarded(async () => { await api("api/login/complete", { code: $("code").value }); await done(); });
+  $("btn-code").onclick = () => guarded(async () => {
+    $("login-msg").textContent = "Prüfe den Code …";
+    await api("api/login/complete", { code: $("code").value });
+    await done();
+  });
+  $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-code").click(); });
   $("btn-confirm").onclick = () => guarded(async () => {
     $("login-msg").textContent = "Warte auf die Bestätigung …";
     await api("api/login/complete", {});

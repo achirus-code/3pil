@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.2
+
+- Trade-Republic-Login mit Authenticator-Code: ein abgelehnter Code (`AUTHENTICATION_ERROR`) zeigt jetzt
+  „Code nicht angenommen“, der Login bleibt offen und ein neuer Code lässt sich ohne PIN eingeben.
+- Code wird bereinigt (Leerzeichen), nach dem Code wartet die App auf die Session wie die TR-Web-App.
+- Verlangt Trade Republic während der App-Bestätigung doch einen Code, wechselt die Seite dorthin.
+- Abgelehnte Login-Schritte stehen mit Status und Fehlercode von Trade Republic im App-Protokoll.
+
 ## 2.0.1
 
 - Installation schlug fehl („pip: not found“): Der Supervisor hat `build.yaml` verworfen und mit seinem
