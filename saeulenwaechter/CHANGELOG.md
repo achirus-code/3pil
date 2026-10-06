@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.10.0
+
+- Wertentwicklung im Popup (kleiner Button „📈 Wertentwicklung“ in der Statistik).
+- Grafik in Säulenfarben gestapelt: Welt grün, Gold gelb, Cash blau (Cash vor Käufen zurückgerechnet).
+- Prüfung der Kaufhistorie: zeigt, ob alle heutigen Stücke durch erkannte Käufe erklärt sind; sonst sind die Gewinne als Annahme (≈) markiert.
+- Prozentwerte in Statistik und Angleichen-Tabelle mit zwei Nachkommastellen.
+- Fehler behoben: Die Liste der Käufe/Verkäufe brach die Anzeige im Papierdepot ab.
+
+- Historie korrigiert: Dividenden, Ausschüttungen, Zinsen und Steuerbuchungen aus der Zeitleiste zählen nicht mehr als Verkäufe (sie verfälschten die Stückzahlen in der Vergangenheit). Nur Einträge mit Stückzahl gelten als Kauf/Verkauf; die Richtung kommt aus der Art der Buchung.
+- Transaktionen werden bei jedem Abgleich komplett neu gelesen; frühere Fehldeutungen verschwinden.
+- Je Position aufklappbar: die erkannten Käufe/Verkäufe (Datum, Art, Stück, Betrag) zum Nachprüfen; im Log je Transaktion eine Zeile.
+
 ## 2.9.0
 
 - Statistik: Zeiträume 1 Woche, 1/3/6 Monate, seit 1.1., 1/3/5 Jahre und Max., jeweils mit Gewinn je Säule.
