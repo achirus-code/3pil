@@ -85,6 +85,14 @@ const STYLE = `
   .interest { margin-top:10px; padding:8px 10px; border-radius:8px; background:var(--secondary-background-color, rgba(127,127,127,.12)); font-size:13px; }
   .interest .muted { opacity:.7; }
   .muted { color:var(--secondary-text-color); font-weight:normal; }
+  button.sw.small { padding:4px 10px; font-size:12px; }
+  .modal { position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.55); display:flex; align-items:flex-start; justify-content:center;
+           padding:40px 12px; overflow-y:auto; }
+  .modal-box { position:relative; width:min(860px, 100%); background:var(--card-background-color, #1c1c1e); color:var(--primary-text-color);
+               border-radius:14px; padding:16px 18px 18px; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+  .modal-x { position:absolute; top:10px; right:10px; border:0; background:transparent; color:var(--secondary-text-color); font-size:18px; cursor:pointer; }
+  .modal-box > .label:first-of-type { margin-top:0 !important; }
+  .note.ok { color:var(--sw-green); }
   details.trades { font-size:12px; }
   details.trades summary { cursor:pointer; color:var(--primary-color); }
   details.trades table { width:100%; border-collapse:collapse; margin-top:4px; }
@@ -123,6 +131,7 @@ const STYLE = `
   .chart-wrap .mark { position:absolute; bottom:18px; transform:translateX(-50%); font-size:9px; pointer-events:none; line-height:1; }
   .chart-wrap .mark.buy { color:var(--sw-green); }
   .chart-wrap .mark.sell { color:var(--sw-red); }
+  .chart-wrap .tip .sep { border-top:1px solid var(--divider-color); padding-top:3px; margin-top:5px; }
   .chart-wrap .tip .ev { color:var(--secondary-text-color); border-top:1px solid var(--divider-color); padding-top:3px; }
   .chart-wrap .tip i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; }
   .period { display:flex; flex-direction:column; align-items:flex-start; gap:1px; padding:6px 10px; border-radius:8px; cursor:pointer;
@@ -260,7 +269,7 @@ class SaeulenBase extends HTMLElement {
 
   position(p, d) {
     if (!p.held || !p.held.length) return "";
-    const trades = (d && d.trades) || [];
+    const trades = (d && d.tr_trades) || [];
     const tradeList = (isin) => {
       const ts = trades.filter((t) => t.isin === isin).slice().reverse();
       if (!ts.length) return "";
@@ -345,7 +354,7 @@ class SaeulenBase extends HTMLElement {
   }
 
   rebalanceTable(rows) {
-    const pc = (v) => `${(v * 100).toLocaleString("de-DE", { maximumFractionDigits: 1 })} %`;
+    const pc = (v) => `${(v * 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`;
     // Eine Säule in Cash hält ihr Geld als Guthaben: da wird nichts ge- oder verkauft, nur Cash umgeschichtet
     const move = (r) => Math.abs(r.delta) < 1 ? "passt"
       : r.cash ? `${r.delta > 0 ? "als Cash halten +" : "aus Cash nehmen "}${eur(Math.abs(r.delta), 0)}`
@@ -388,7 +397,7 @@ class SaeulenBase extends HTMLElement {
         <td class="num">${eur(r.value, 0)}</td>
         <td class="num">${r.cost != null ? eur(r.cost, 0) : (r.invested === false ? "Cash" : "–")}</td>
         <td class="num" style="color:${color(r.pnl)}">${signed(r.pnl)}</td>
-        <td class="num" style="color:${color(r.pnl)}">${r.pnl_pct != null ? pct(r.pnl_pct) : ""}</td>
+        <td class="num" style="color:${color(r.pnl)}">${r.pnl_pct != null ? pct(r.pnl_pct, 2) : ""}</td>
         <td class="num" style="color:${color(today[r.key])}">${today[r.key] != null ? signed(today[r.key]) : "–"}</td>
         <td class="num muted">${since[r.key] ? heldFor(since[r.key], false) : "–"}</td></tr>`;
     return `<div class="section">
@@ -396,16 +405,34 @@ class SaeulenBase extends HTMLElement {
       <div class="stat-top num">
         <div><div class="k">Gesamtwert</div><div class="big">${eur(t.value, 0)}</div></div>
         <div><div class="k">Einstand</div><div class="mid">${t.cost != null ? eur(t.cost, 0) : "–"}</div></div>
-        <div><div class="k">Gewinn / Verlust</div><div class="mid" style="color:${color(t.pnl)}">${signed(t.pnl)}${t.pnl_pct != null ? ` · ${pct(t.pnl_pct)}` : ""}</div></div>
-        <div><div class="k">Heute</div><div class="mid" style="color:${color(todayTotal)}">${signed(todayTotal)}${todayPct != null ? ` · ${pct(todayPct)}` : ""}</div></div>
+        <div><div class="k">Gewinn / Verlust</div><div class="mid" style="color:${color(t.pnl)}">${signed(t.pnl)}${t.pnl_pct != null ? ` · ${pct(t.pnl_pct, 2)}` : ""}</div></div>
+        <div><div class="k">Heute</div><div class="mid" style="color:${color(todayTotal)}">${signed(todayTotal)}${todayPct != null ? ` · ${pct(todayPct, 2)}` : ""}</div></div>
       </div>
       <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th><th>Heute</th><th>Gehalten</th></tr>
         ${st.rows.map(row).join("")}</table>
       ${this.interestLine(st.interest)}
       ${this.reconcileLine(d.reconcile)}
       <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
-      ${this.performance(d)}
+      ${d.performance && d.performance.series && d.performance.series.length > 1
+        ? `<div style="margin-top:10px"><button class="sw small" data-perf-open>📈 Wertentwicklung</button></div>` : this.history(d)}
+      ${this._perfOpen ? this.perfModal(d) : ""}
     </div>`;
+  }
+
+  perfModal(d) {
+    const perf = d.performance || {};
+    const cov = (perf.coverage || []).filter((c) => !c.complete);
+    const quality = perf.complete
+      ? `<div class="note ok">✓ Kaufhistorie vollständig: Alle heutigen Stücke sind durch erkannte Käufe/Verkäufe erklärt.</div>`
+      : `<div class="note warn">⚠ Kaufhistorie unvollständig – für diese Stücke ist kein Kauf bekannt; sie werden so gerechnet, als lägen sie schon vor Beginn im Depot (Gewinn davor ist dann nur eine Annahme):
+          ${cov.map((c) => `<br>· ${esc(c.name)}: ${c.missing.toLocaleString("de-DE", { maximumFractionDigits: 3 })} von ${c.size.toLocaleString("de-DE", { maximumFractionDigits: 3 })} Stück${c.first ? ` (erster erkannter Kauf ${new Date(c.first).toLocaleDateString("de-DE")})` : " (keine Käufe erkannt)"}`).join("")}
+          ${d.mode === "depot" ? "<br>Einmal „Neu synchronisieren“ lädt die Käufe neu." : ""}</div>`;
+    return `<div class="modal" data-perf-close>
+      <div class="modal-box" role="dialog" aria-label="Wertentwicklung">
+        <button class="modal-x" data-perf-close aria-label="Schließen">✕</button>
+        ${this.performance(d)}
+        ${quality}
+      </div></div>`;
   }
 
   performance(d) {
@@ -422,112 +449,125 @@ class SaeulenBase extends HTMLElement {
       const p = perf.periods[k];
       return `<button class="period${k === sel ? " on" : ""}" data-period="${k}" ${p ? "" : "disabled"}>
         <span class="k">${LABELS[k]}</span>
-        <span class="num" style="color:${col(p && p.gain)}">${p ? signed(p.gain) : "–"}</span>
-        <span class="num small" style="color:${col(p && p.gain)}">${p && p.pct != null ? pct(p.pct) : ""}</span></button>`;
+        <span class="num" style="color:${col(p && p.gain)}">${p ? (perf.complete ? "" : "≈ ") + signed(p.gain) : "–"}</span>
+        <span class="num small" style="color:${col(p && p.gain)}">${p && p.pct != null ? pct(p.pct, 2) : ""}</span></button>`;
     }).join("");
     const cur = perf.periods[sel];
     const i0 = Math.max(0, perf.series.findIndex((r) => r[0] >= cur.from));
     const rows = perf.series.slice(i0);
     const flows = (perf.flows || []).slice(i0);
+    const cash = (perf.cash || []).slice(i0);
     const names = Object.fromEntries(Object.values(d.pillars).map((p) => [p.key, p]));
-    this._chart = { rows, flows, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
+    this._chart = { rows, flows, cash, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
                     colors: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).color || "#888"])) };
     const split = perf.keys.map((k) => {
       const v = cur.pillars[k];
       return `<span><i style="background:${esc(this._chart.colors[k])}"></i>${esc(this._chart.names[k])} <b class="num" style="color:${col(v)}">${signed(v)}</b></span>`;
     }).join("");
+    const cashNow = (perf.cash || []).slice(-1)[0];
+    const splitCash = cashNow ? `<span><i style="background:#5ac8fa"></i>Cash ${eur(cashNow, 0)}</span>` : "";
     const inv = cur.invested ? ` · im Zeitraum investiert <b class="num">${signed(cur.invested)}</b> (zählt nicht als Gewinn)` : "";
     const src = perf.history
       ? "Stückzahlen je Tag aus deinen Käufen und Verkäufen bei Trade Republic"
       : d.mode === "depot"
         ? "<b>Ohne Kaufhistorie</b> – mit den heutigen Stückzahlen gerechnet. Einmal „Neu synchronisieren“, dann liest die App deine Käufe und Verkäufe"
         : "Papierdepot ab Einstieg";
-    return `<div class="label" style="margin-top:12px">Wertentwicklung der Wertpapiere</div>
+    return `<div class="label" style="margin-top:12px">Wertentwicklung</div>
       <div class="periods">${chips}</div>
-      <div class="parts" style="margin:2px 0 4px">${split}${inv ? `<span>${inv}</span>` : ""}</div>
+      <div class="parts" style="margin:2px 0 4px">${split}${splitCash}${inv ? `<span>${inv}</span>` : ""}</div>
+      ${perf.complete ? "" : `<div class="note warn">≈ Kaufhistorie unvollständig – die Gewinne sind eine Annahme mit den heutigen Stückzahlen (Details unten).</div>`}
       ${this.chart(rows)}
-      <div class="note">${src}. Gewinn = Wertänderung ohne neu investiertes Geld; Cash ist nicht enthalten. ▲ Kauf, ▼ Verkauf – mit der Maus oder dem Finger über die Grafik fahren für Einzelwerte.</div>`;
+      <div class="note">${src}. Gewinn = Wertänderung ohne neu investiertes Geld. Cash (blau) vor Käufen zurückgerechnet, Ein-/Auszahlungen unbekannt. ▲ Kauf, ▼ Verkauf – mit der Maus oder dem Finger über die Grafik fahren für Einzelwerte.</div>`;
+  }
+
+  // Gestapelte Flächen: je Säule in ihrer Farbe, Cash blau obendrauf
+  _geom(rows, cash, W, H, L, R, T, B) {
+    const tot = rows.map((r, i) => r[1] + (cash[i] || 0));
+    let lo = Math.min(...rows.map((r) => r[1]), ...tot) , hi = Math.max(...tot);
+    lo = Math.max(0, lo - (hi - lo) * 0.15);
+    if (hi - lo < 1) { lo -= 1; hi += 1; }
+    hi += (hi - lo) * 0.05;
+    const x = (i) => L + (rows.length > 1 ? i / (rows.length - 1) : 0) * (W - L - R);
+    const y = (v) => T + (1 - (Math.max(v, lo) - lo) / (hi - lo)) * (H - T - B);
+    return { tot, lo, hi, x, y };
   }
 
   chart(rows) {
-    const W = 600, H = 170, L = 4, R = 4, T = 8, B = 18;
-    const vals = rows.map((r) => r[1]);
-    let lo = Math.min(...vals), hi = Math.max(...vals);
-    if (hi - lo < 1) { lo -= 1; hi += 1; }
-    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
-    const x = (i) => L + (rows.length > 1 ? i / (rows.length - 1) : 0) * (W - L - R);
-    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-    const line = rows.map((r, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(r[1]).toFixed(1)}`).join("");
-    const area = `${line}L${x(rows.length - 1).toFixed(1)},${H - B}L${x(0).toFixed(1)},${H - B}Z`;
-    const gainNow = this._chart && this._chart.cur ? this._chart.cur.gain : rows[rows.length - 1][1] - rows[0][1];
-    const c = gainNow >= 0 ? "var(--sw-green)" : "var(--sw-red)";
+    const W = 600, H = 190, L = 4, R = 4, T = 8, B = 18;
+    const { cash = [], keys = [], colors = {}, cur } = this._chart || {};
+    const { tot, lo, hi, x, y } = this._geom(rows, cash, W, H, L, R, T, B);
+    // Schichten von unten: Säulen (Wertpapiere) in Säulenfarbe, dann Cash
+    const layers = [...keys.map((k, j) => ({ color: colors[k], val: (r) => r[2 + j] || 0 })),
+                    { color: "#5ac8fa", val: (r, i) => cash[i] || 0, cash: true }];
+    let base = rows.map(() => lo);
+    const paths = layers.map((ly) => {
+      const upper = rows.map((r, i) => base[i] + ly.val(r, i));
+      const up = upper.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+      const down = base.map((v, i) => `L${x(i).toFixed(1)},${y(v).toFixed(1)}`).reverse().join("");
+      base = upper;
+      return `<path d="${up}${down}Z" fill="${esc(ly.color)}" opacity="${ly.cash ? 0.35 : 0.55}"/>`;
+    }).join("");
+    const line = tot.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    const g = cur ? cur.gain : 0;
     const fmtD = (iso, long) => new Date(iso).toLocaleDateString("de-DE", long ? { day: "numeric", month: "short", year: "numeric" } : { month: "short", year: "2-digit" });
-    // drei Hilfslinien mit Werten und vier Datumsmarken
-    const grid = [0, 0.5, 1].map((f) => { const v = lo + pad + f * (hi - lo - 2 * pad); return `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/>`; }).join("");
-    const gridLabels = [0, 0.5, 1].map((f) => { const v = lo + pad + f * (hi - lo - 2 * pad); return `<span style="top:${(y(v) / H * 100).toFixed(1)}%">${eur(v, 0)}</span>`; }).join("");
+    const levels = [0.1, 0.55, 1].map((f) => lo + f * (hi - lo) * 0.95);
+    const grid = levels.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/>`).join("");
+    const gridLabels = levels.map((v) => `<span style="top:${(y(v) / H * 100).toFixed(1)}%">${eur(v, 0)}</span>`).join("");
     const ticks = [0, 1 / 3, 2 / 3, 1].map((f) => { const i = Math.round(f * (rows.length - 1)); return `<span style="left:${(x(i) / W * 100).toFixed(1)}%">${fmtD(rows[i][0], rows.length < 120)}</span>`; }).join("");
+    const ev = (this._chart && this._chart.events) || [];
+    const byDay = {};
+    for (const e of ev) byDay[e.date] = (byDay[e.date] || 0) + e.amount;
+    const marks = Object.entries(byDay).map(([day, amt]) => {
+      let i = rows.findIndex((r) => r[0] >= day);
+      if (i < 0) i = rows.length - 1;
+      return `<span class="mark ${amt >= 0 ? "buy" : "sell"}" style="left:${(x(i) / W * 100).toFixed(2)}%">${amt >= 0 ? "▲" : "▼"}</span>`;
+    }).join("");
     return `<div class="chart-wrap">
       <svg class="perf-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
-           aria-label="Wert von ${eur(rows[0][1], 0)} auf ${eur(rows[rows.length - 1][1], 0)}">
-        ${grid}
-        <path d="${area}" fill="${c}" opacity=".12"/>
-        <path d="${line}" fill="none" stroke="${c}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+           aria-label="Wert von ${eur(tot[0], 0)} auf ${eur(tot[tot.length - 1], 0)}">
+        ${grid}${paths}
+        <path d="${line}" fill="none" stroke="var(--primary-text-color)" stroke-width="1.4" opacity=".8" vector-effect="non-scaling-stroke"/>
         <line class="cross" x1="0" x2="0" y1="${T}" y2="${H - B}" style="display:none"/>
-      </svg>
-      ${(() => {
-        const ev = (this._chart && this._chart.events) || [];
-        const byDay = {};
-        for (const e of ev) byDay[e.date] = (byDay[e.date] || 0) + e.amount;
-        return Object.entries(byDay).map(([day, amt]) => {
-          let i = rows.findIndex((r) => r[0] >= day);
-          if (i < 0) i = rows.length - 1;
-          return `<span class="mark ${amt >= 0 ? "buy" : "sell"}" style="left:${(x(i) / W * 100).toFixed(2)}%">${amt >= 0 ? "▲" : "▼"}</span>`;
-        }).join("");
-      })()}
-      <div class="dot" style="display:none;border-color:${c}"></div>
+      </svg>${marks}
+      <div class="dot" style="display:none;border-color:var(--primary-text-color)"></div>
       <div class="ylabels num">${gridLabels}</div>
       <div class="xlabels num">${ticks}</div>
       <div class="tip" style="display:none"></div>
     </div>
-    <div class="hist-legend num"><span>${fmtD(rows[0][0], true)} – ${fmtD(rows[rows.length - 1][0], true)} · Tief ${eur(Math.min(...vals), 0)} · Hoch ${eur(Math.max(...vals), 0)}</span>
-      ${(() => { const cur = this._chart && this._chart.cur; if (!cur) return ""; const g = cur.gain;
-        return `<span style="color:${g >= 0 ? "var(--sw-green)" : "var(--sw-red)"}">Gewinn ${g >= 0 ? "+" : "−"}${eur(Math.abs(g), 0)}${cur.pct != null ? ` (${pct(cur.pct)})` : ""}</span>`; })()}</div>`;
+    <div class="hist-legend num"><span>${fmtD(rows[0][0], true)} – ${fmtD(rows[rows.length - 1][0], true)} · Tief ${eur(Math.min(...tot), 0)} · Hoch ${eur(Math.max(...tot), 0)}</span>
+      ${cur ? `<span style="color:${g >= 0 ? "var(--sw-green)" : "var(--sw-red)"}">Gewinn ${g >= 0 ? "+" : "−"}${eur(Math.abs(g), 0)}${cur.pct != null ? ` (${pct(cur.pct, 2)})` : ""}</span>` : ""}</div>`;
   }
 
   _bindChart() {
     const wrap = this.shadowRoot.querySelector(".chart-wrap");
     if (!wrap || !this._chart) return;
-    const { rows, flows, keys, names, colors, events } = this._chart;
+    const { rows, flows, cash = [], keys, names, colors, events } = this._chart;
     const svg = wrap.querySelector("svg"), tip = wrap.querySelector(".tip"), cross = wrap.querySelector(".cross"),
           dot = wrap.querySelector(".dot");
     const [, , W, H] = svg.getAttribute("viewBox").split(" ").map(Number);
     const L = 4, R = 4, T = 8, B = 18;
-    const vals = rows.map((r) => r[1]);
-    let lo = Math.min(...vals), hi = Math.max(...vals);
-    if (hi - lo < 1) { lo -= 1; hi += 1; }
-    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    const { tot, x, y } = this._geom(rows, cash, W, H, L, R, T, B);
+    const sign = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
+    const colr = (v) => Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
     const show = (clientX) => {
       const box = svg.getBoundingClientRect();
       const fx = Math.min(1, Math.max(0, ((clientX - box.left) / box.width * W - L) / (W - L - R)));
       const i = Math.round(fx * (rows.length - 1));
       const r = rows[i], first = rows[0];
-      const px = L + (rows.length > 1 ? i / (rows.length - 1) : 0) * (W - L - R);
-      const py = T + (1 - (r[1] - lo) / (hi - lo)) * (H - T - B);
+      const px = x(i), py = y(tot[i]);
       cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.style.display = "";
       dot.style.display = ""; dot.style.left = `${px / W * 100}%`; dot.style.top = `${py / H * 100}%`;
-      const ch = r[1] - first[1];
-      const sign = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
-      const colr = (v) => Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
+      const inv = (flows || []).slice(1, i + 1).reduce((a, f) => a + f[0], 0);
+      const gain = r[1] - first[1] - inv;
       tip.innerHTML = `<b>${new Date(r[0]).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" })}</b>
-        <div class="row"><span>Gesamt</span><b class="num">${eur(r[1], 0)}</b></div>
-        ${(() => { const inv = (flows || []).slice(1, i + 1).reduce((a, f) => a + f[0], 0); const g = ch - inv;
-          return `<div class="row"><span>Gewinn seit ${new Date(first[0]).toLocaleDateString("de-DE")}</span><b class="num" style="color:${colr(g)}">${sign(g)}</b></div>`
-            + (Math.abs(inv) >= 1 ? `<div class="row"><span>investiert seitdem</span><span class="num">${sign(inv)}</span></div>` : ""); })()}
-        ${keys.map((k, j) => `<div class="row"><span><i style="background:${esc(colors[k])}"></i>${esc(names[k])}</span><span class="num">${eur(r[2 + j], 0)}</span></div>`).join("")}
+        <div class="row"><span>Gesamt</span><b class="num">${eur(tot[i], 0)}</b></div>
+        ${keys.map((k, j) => r[2 + j] ? `<div class="row"><span><i style="background:${esc(colors[k])}"></i>${esc(names[k])}</span><span class="num">${eur(r[2 + j], 0)}</span></div>` : "").join("")}
+        ${cash.length ? `<div class="row"><span><i style="background:#5ac8fa"></i>Cash</span><span class="num">${eur(cash[i] || 0, 0)}</span></div>` : ""}
+        <div class="row sep"><span>Gewinn seit ${new Date(first[0]).toLocaleDateString("de-DE")}</span><b class="num" style="color:${colr(gain)}">${sign(gain)}</b></div>
+        ${Math.abs(inv) >= 1 ? `<div class="row"><span>investiert seitdem</span><span class="num">${sign(inv)}</span></div>` : ""}
         ${(events || []).filter((e) => e.date === r[0] || (i > 0 && e.date > rows[i - 1][0] && e.date <= r[0])).map((e) =>
           `<div class="row ev"><span>${e.amount >= 0 ? "▲ Kauf" : "▼ Verkauf"} ${esc(e.name)}</span><span class="num">${eur(Math.abs(e.amount), 0)}${e.shares ? ` · ${Math.abs(e.shares).toLocaleString("de-DE", { maximumFractionDigits: 3 })} St.` : ""}</span></div>`).join("")}`;
       tip.style.display = "";
-      // neben den Cursor, auf der Seite mit mehr Platz
       const left = px / W * box.width;
       tip.style.left = `${left > box.width / 2 ? Math.max(left - tip.offsetWidth - 14, 0) : Math.min(left + 14, box.width - tip.offsetWidth)}px`;
     };
@@ -563,7 +603,7 @@ class SaeulenBase extends HTMLElement {
         ${h.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="5" fill="transparent"><title>${dates(p)}: ${eur(p.value, 0)}${p.pnl != null ? " · G/V " + eur(p.pnl, 0) : ""}</title></circle>`).join("")}
       </svg>
       <div class="hist-legend num"><span>Tief ${eur(Math.min(...vals), 0)} · Hoch ${eur(Math.max(...vals), 0)}</span>
-        <span style="color:${col}">${change >= 0 ? "+" : "−"}${eur(Math.abs(change), 0)} (${pct(change / first.value)})</span></div>`;
+        <span style="color:${col}">${change >= 0 ? "+" : "−"}${eur(Math.abs(change), 0)} (${pct(change / first.value, 2)})</span></div>`;
   }
 
   pillars(d, active) {
@@ -636,6 +676,14 @@ Soll eine Position mitzählen: ISIN in den Optionen unter „Weitere ISINs …�
     this.shadowRoot.querySelectorAll("[data-period]").forEach((b) =>
       b.addEventListener("click", (e) => { e.stopPropagation(); this._period = b.dataset.period; this._render(); }));
     this._bindChart();
+    const open = this.shadowRoot.querySelector("[data-perf-open]");
+    if (open) open.addEventListener("click", (e) => { e.stopPropagation(); this._perfOpen = true; this._render(); });
+    this.shadowRoot.querySelectorAll("[data-perf-close]").forEach((el) =>
+      el.addEventListener("click", (e) => { if (e.target === el) { this._perfOpen = false; this._render(); } }));
+    if (!this._escBound) {
+      this._escBound = true;
+      window.addEventListener("keydown", (e) => { if (e.key === "Escape" && this._perfOpen) { this._perfOpen = false; this._render(); } });
+    }
     this.shadowRoot.querySelectorAll("[data-since]").forEach((b) =>
       b.addEventListener("click", (e) => {
         e.stopPropagation();

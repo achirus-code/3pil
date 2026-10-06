@@ -810,8 +810,9 @@ class Engine:
             },
             "tr_split": split,
             "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
-            "performance": self._performance(holdings, mode, today),
-            "trades": [{k: t.get(k) for k in ("date", "isin", "subtitle", "shares", "amount")}
+            "performance": self._performance(holdings, mode, today,
+                                             sum(values[k] for k in pillars if not holdings.get(k))),
+            "tr_trades": [{k: t.get(k) for k in ("date", "isin", "subtitle", "shares", "amount")}
                        for t in self.state.get("trades", [])] if mode == "depot" else [],
             "market_error": market.get("_error"),
             "macro_status": {k: {"ok_at": v.get("ok_at"), "error": v.get("error")}
@@ -941,7 +942,7 @@ class Engine:
         y, m = divmod(today.year * 12 + today.month - 1 - months, 12)
         return date(y, m + 1, min(today.day, calendar.monthrange(y, m + 1)[1]))
 
-    def _performance(self, holdings: dict, mode: str, today: date) -> dict | None:
+    def _performance(self, holdings: dict, mode: str, today: date, cash_now: float = 0.0) -> dict | None:
         """Echter Verlauf der Wertpapiere über 1 Woche bis 5 Jahre (aus Tagesschlusskursen).
 
         Die Stückzahl je Tag wird vom heutigen Bestand aus rückwärts über die Käufe und Verkäufe gerechnet
@@ -1058,8 +1059,26 @@ class Engine:
                           "amount": round(-t["amount"], 2), "shares": round(t["shares"], 4)}
                          for ln in lines for t in ln["trades"] if t["date"] >= rows[0][0]),
                         key=lambda e: e["date"])
-        return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events,
-                "history": all(ln["known"] for ln in lines),
+        # Cash je Tag: heutiges Cash plus das Geld, das später in Käufe floss (vorher lag es noch als Cash da),
+        # minus spätere Verkaufserlöse. Ein- und Auszahlungen kennt die App nicht – nie unter null.
+        cash_series = []
+        later = sum(f[0] for f in flows)
+        for i, f in enumerate(flows):
+            later -= f[0]
+            cash_series.append(round(max(cash_now + later, 0.0), 2))
+        # Prüfung: erklären die Käufe/Verkäufe den heutigen Bestand? Nicht erklärte Stücke werden so gerechnet,
+        # als lägen sie schon vor Beginn im Depot – dann ist der Verlauf für sie nur eine Annahme.
+        coverage = []
+        for ln in lines:
+            explained = sum(t["shares"] for t in ln["trades"])
+            missing = ln["size"] - explained
+            coverage.append({"name": ln["name"], "isin": ln["isin"], "size": round(ln["size"], 4),
+                             "explained": round(explained, 4), "missing": round(missing, 4),
+                             "complete": abs(missing) <= max(0.01 * ln["size"], 1e-6),
+                             "first": min((t["date"] for t in ln["trades"]), default=None)})
+        complete = all(c["complete"] for c in coverage)
+        return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events, "cash": cash_series,
+                "history": all(ln["known"] for ln in lines), "complete": complete, "coverage": coverage,
                 "synced_trades_at": self.state.get("trades_at") if mode == "depot" else None}
 
     @staticmethod
