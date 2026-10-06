@@ -1,0 +1,33 @@
+configuration:
+  total:
+    name: Gesamtbetrag (€)
+    description: Summe der drei Säulen (40/30/30), im Papiermodus das Startkapital. Eine Änderung setzt die Beträge neu.
+  wa_phone:
+    name: WhatsApp-Nummer
+    description: Internationales Format ohne +, z. B. 4917…
+  wa_apikey:
+    name: CallMeBot API-Key
+    description: Schlüssel von CallMeBot für WhatsApp-Meldungen.
+  notify:
+    name: WhatsApp-Meldungen senden
+  monthly_report:
+    name: Monatsbericht auch ohne Änderung
+  switch_warning:
+    name: Vorwarnung, wenn ein Signal zum Monatsende kippen würde
+  rebalance_month:
+    name: Monat für das jährliche Angleichen (1–12)
+  use_depot:
+    name: Echtes Trade-Republic-Depot verwenden
+    description: Nach dem Login in der App-Oberfläche. Aus = Papierdepot.
+  extra_welt:
+    name: Weitere ISINs Welt
+    description: Kommagetrennt; zählen wie SPDR MSCI ACWI IMI.
+  extra_gold:
+    name: Weitere ISINs Gold
+    description: Kommagetrennt; zählen wie Xetra-Gold.
+  extra_anleihen:
+    name: Weitere ISINs Anleihen
+    description: Kommagetrennt; zählen wie Xtrackers Eurozone Gov Bond.
+  bls_key:
+    name: BLS-API-Key (optional)
+    description: Für mehr Abrufe der US-Arbeitslosenquote.

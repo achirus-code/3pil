@@ -25,7 +25,7 @@ const eur = (v, d = 2) => (v == null ? "–" : v.toLocaleString("de-DE", { minim
 const pct = (v, d = 1, sign = true) => {
   if (v == null) return "–";
   const r = Math.round(v * 100 * 10 ** d) / 10 ** d || 0; // kein „−0,0 %“
-  return (sign && r >= 0 ? "+" : r < 0 ? "−" : "") + Math.abs(r).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d }) + " %";
+  return (sign && r > 0 ? "+" : r < 0 ? "−" : "") + Math.abs(r).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d }) + " %";
 };
 const monthLabel = (k) => { if (!k) return "–"; const [y, m] = k.split("-"); return `${MONTHS[+m - 1]} ${y}`; };
 
@@ -69,7 +69,7 @@ const STYLE = `
   table.stats { width:100%; border-collapse:collapse; font-size:12px; margin:2px 0 10px; }
   table.stats th { text-align:right; font-weight:500; color:var(--secondary-text-color); padding:2px 4px; }
   table.stats th:first-child, table.stats td:first-child { text-align:left; padding-left:0; }
-  table.stats td { text-align:right; padding:3px 4px; border-top:1px solid var(--divider-color); }
+  table.stats td { text-align:right; padding:3px 4px; border-top:1px solid var(--divider-color); white-space:nowrap; }
   .alarm { margin:12px; padding:14px 16px; border-radius:12px; color:#fff;
            background:linear-gradient(135deg, #d70015, #ff3b30); border:3px solid #ff3b30;
            box-shadow:0 0 0 0 rgba(255,59,48,.7); animation:sw-pulse 1.6s infinite; }
@@ -246,7 +246,7 @@ class SaeulenBase extends HTMLElement {
       : "";
     return `<div class="bar tr" style="overflow:hidden">${fills}
         <div class="mark" style="left:${t.soll * 100}%"></div></div>
-      <div class="trv num${warn ? " warn" : ""}">${label ? esc(label) + " · " : ""}Trade Republic ${Math.round(t.ist * 100)} % · soll ${Math.round(t.soll * 100)} % · ${eur(t.value, 0)}</div>${legend}`;
+      <div class="trv num${warn ? " warn" : ""}">${label ? esc(label) + " · " : ""}${split.source === "paper" ? "Papierdepot" : "Trade Republic"} ${Math.round(t.ist * 100)} % · soll ${Math.round(t.soll * 100)} % · ${eur(t.value, 0)}</div>${legend}`;
   }
 
   trExtra(d) {
@@ -257,7 +257,7 @@ class SaeulenBase extends HTMLElement {
     const list = un.length ? `<div class="note warn">Nicht zugeordnet: ${un.map((u) =>
       `${esc(u.name)} (${esc(u.isin)}, ${eur(u.value, 0)})${u.suggestion_name ? " – vermutlich " + esc(u.suggestion_name) : ""}`).join("; ")}.
       In den Optionen unter „Weitere ISINs …“ eintragen, dann zählt die Position zur Säule.</div>` : "";
-    const legend = split ? `<div class="note"><span style="color:var(--sw-tr)">■</span> Verteilung bei Trade Republic (erkannte Positionen + Cash = ${eur(split.base, 0)}), Strich = Soll laut aktueller Entscheidung.</div>` : "";
+    const legend = split ? `<div class="note"><span style="color:var(--sw-tr)">■</span> Aktueller Bestand ${split.source === "paper" ? "im Papierdepot" : "bei Trade Republic (erkannte Positionen"} + Cash = ${eur(split.base, 0)}${split.source === "paper" ? "" : ")"}, Strich = Soll laut aktueller Entscheidung.</div>` : "";
     return cash + legend + list;
   }
 
@@ -292,7 +292,7 @@ class SaeulenBase extends HTMLElement {
         <div><div class="k">Einstand</div><div class="mid">${t.cost != null ? eur(t.cost, 0) : "–"}</div></div>
         <div><div class="k">Gewinn / Verlust</div><div class="mid" style="color:${color(t.pnl)}">${signed(t.pnl)}${t.pnl_pct != null ? ` · ${pct(t.pnl_pct)}` : ""}</div></div>
       </div>
-      <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Gewinn / Verlust</th></tr>
+      <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th></tr>
         ${st.rows.map(row).join("")}</table>
       <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
       ${this.history(d)}

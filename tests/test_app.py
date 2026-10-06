@@ -1,0 +1,279 @@
+"""Die App ohne Home Assistant: Engine (Papier- und echtes Depot), Weboberfläche und Übertragung an HA.
+
+Kurse und Wirtschaftsdaten kommen aus der aufgezeichneten Live-Datei tests/fixture_live.json.
+"""
+
+import json
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import aiohttp
+import pytest
+from aiohttp import web
+
+from sw import engine as engine_mod
+from sw import macro
+from sw.engine import Engine
+from sw.ha import HomeAssistantPublisher, build_states
+from sw.tr_api import TRAuthError, TradeRepublic
+from sw.web import make_app
+
+FIXTURE = json.loads((Path(__file__).parent / "fixture_live.json").read_text())
+BERLIN = ZoneInfo("Europe/Berlin")
+OPTIONS = {"total": 100000, "wa_phone": "4917000000", "wa_apikey": "test", "notify": True,
+           "monthly_report": True, "switch_warning": True, "rebalance_month": 1, "use_depot": True}
+
+
+@pytest.fixture
+def sent():
+    return []
+
+
+@pytest.fixture
+def market(monkeypatch):
+    """Kurse/Kerzen und Wirtschaftsdaten aus der Aufzeichnung; die Datei selbst bleibt unverändert."""
+    data = json.loads(json.dumps(FIXTURE["market"]))
+
+    async def market_data(self, isins, exchange, candles=True, names=True):
+        out = {}
+        for i in isins:
+            d = data.get(i, {})
+            out[i] = {"price": d.get("price")}
+            if candles:
+                out[i]["candles"] = d.get("candles")
+            if names:
+                out[i]["name"] = d.get("name")
+        return out
+
+    def fetcher(key):
+        async def f(session, *a):
+            return FIXTURE["macro"][key]
+        return f
+
+    monkeypatch.setattr(TradeRepublic, "market_data", market_data)
+    monkeypatch.setattr(macro, "FETCHERS", {k: fetcher(k) for k in macro.FETCHERS})
+    monkeypatch.setattr(engine_mod, "FETCHERS", {k: fetcher(k) for k in macro.FETCHERS})
+    return data
+
+
+@pytest.fixture
+async def make_engine(tmp_path, market, sent, monkeypatch):
+    async def send(session, phone, apikey, text):
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(engine_mod, "send_whatsapp", send)
+    sessions = []
+
+    async def factory(options=None, when="2026-10-06 10:00"):
+        http = aiohttp.ClientSession()
+        sessions.append(http)
+        eng = Engine(tmp_path, {**OPTIONS, **(options or {})}, http)
+        await eng.async_load()
+        eng.clock = datetime.fromisoformat(when).replace(tzinfo=BERLIN)
+        eng.now = lambda: eng.clock
+        return eng
+
+    yield factory
+    for s in sessions:
+        await s.close()
+
+
+# ------------------------------------------------------------------ Papierdepot
+
+async def test_paper_decision_messages_and_state_file(make_engine, sent, tmp_path):
+    eng = await make_engine()
+    d = await eng.refresh()
+    assert d["mode"] == "paper"
+    states = {k: p["state"] for k, p in d["pillars"].items()}
+    assert states == {"welt": "in", "gold": "in", "anleihen": "cash"}
+    assert 99_000 < d["overview"]["total"] < 101_000
+    assert d["pillars"]["welt"]["signals"][0]["title"] == "Entscheidung Okt. 2026"
+    assert len(sent) == 1 and "Monatsentscheidung Okt. 2026" in sent[0]
+    assert len(d["value_history"]) == 1
+    # Bestandsbalken auch im Papierdepot: Welt und Gold investiert, Anleihen-Anteil als Cash
+    split = d["tr_split"]
+    assert split["source"] == "paper"
+    rows = {r["key"]: r for r in split["rows"]}
+    assert rows["welt"]["ist"] == pytest.approx(0.4, abs=0.01) and rows["anleihen"]["ist"] == 0
+    assert split["cash"]["ist"] == pytest.approx(0.3, abs=0.01) and split["cash"]["soll"] == pytest.approx(0.3)
+
+    await eng.refresh()
+    assert len(sent) == 1  # nichts Neues
+
+    # Zustand liegt in /data/state.json und überlebt einen Neustart
+    saved = json.loads((tmp_path / "state.json").read_text())
+    assert saved["pillars"]["welt"]["month"] == "2026-10"
+    eng2 = await make_engine(when="2026-11-02 10:00")
+    await eng2.refresh()
+    assert len(sent) == 2 and "Monatsentscheidung Nov. 2026" in sent[1]
+    assert [h["month"] for h in eng2.data["pillars"]["welt"]["history"]] == ["2026-10", "2026-11"]
+
+
+# ------------------------------------------------------------------ echtes Depot
+
+async def test_depot_actions_recognition_and_expired_login(make_engine, sent, market, monkeypatch):
+    depot = {"positions": {"IE00B3YLTY66": {"size": 3350.0, "avg_buy": 11.0},
+                           "LU0290355717": {"size": 140.0, "avg_buy": 220.0}}, "cash": 30000.0}
+
+    async def portfolio(self):
+        if isinstance(depot, Exception):
+            raise depot
+        return depot
+
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    eng = await make_engine()
+    eng.tr.cookies = {"tr_session": "s", "tr_refresh": "r"}
+    d = await eng.refresh()
+    assert d["mode"] == "depot"
+    actions = {k: p["action"] for k, p in d["pillars"].items()}
+    assert actions == {"welt": "hold", "gold": "buy", "anleihen": "sell"}
+    todo = {t["key"]: t["text"] for t in d["todo"]}
+    assert todo["gold"].startswith("KAUFEN: Xetra-Gold") and todo["anleihen"].startswith("KOMPLETT VERKAUFEN")
+    assert "KOMPLETT VERKAUFEN: Xtrackers Eurozone Gov Bond" in sent[-1]
+
+    # umgesetzt
+    depot["positions"] = {"IE00B3YLTY66": {"size": 3350.0, "avg_buy": 11.0},
+                          "DE000A0S9GB0": {"size": 250.0, "avg_buy": 118.5}}
+    n = len(sent)
+    d = await eng.refresh()
+    assert d["todo"] == [] and len(sent) == n + 1 and sent[-1].count("umgesetzt") == 2
+
+    # gleichwertige Produkte und eine unbekannte Aktie
+    market["IE000VAHT5T0"] = {"price": {"bid": 4.46, "ask": 4.47, "last": 4.46}, "name": "FTSE Global All-Cap USD (Acc)"}
+    market["JE00BN2CJ301"] = {"price": {"bid": 366.0, "ask": 366.1, "last": 366.0}, "name": "Core Physical Gold USD"}
+    market["US0378331005"] = {"price": {"bid": 200.0, "ask": 200.2, "last": 200.0}, "name": "Apple"}
+    depot["positions"] = {"IE000VAHT5T0": {"size": 9000.0, "avg_buy": 4.3},
+                          "JE00BN2CJ301": {"size": 80.0, "avg_buy": 350.0},
+                          "US0378331005": {"size": 5.0, "avg_buy": 180.0}}
+    d = await eng.refresh()
+    assert d["pillars"]["welt"]["action"] == "hold" and d["pillars"]["gold"]["action"] == "hold"
+    assert d["pillars"]["welt"]["held"][0]["counts_as_name"] == "SPDR MSCI ACWI IMI"
+    assert [u["isin"] for u in d["depot"]["unassigned"]] == ["US0378331005"]
+    assert "nicht zugeordnet: Apple (US0378331005)" in sent[-1]
+    stats = {r["key"]: r for r in d["stats"]["rows"]}
+    assert stats["gold"]["pnl"] == pytest.approx(80 * (366.0 - 350.0))
+    split = d["tr_split"]
+    assert split["base"] == pytest.approx(9000 * 4.46 + 80 * 366.0 + 30000.0)
+
+    # eigene Zusatz-ISIN aus den Optionen
+    eng2 = await make_engine({"extra_welt": "us0378331005"})
+    eng2.tr.cookies = {"tr_session": "s"}
+    d = await eng2.refresh()
+    assert d["depot"]["unassigned"] == []
+    assert {h["isin"] for h in d["pillars"]["welt"]["held"]} == {"IE000VAHT5T0", "US0378331005"}
+
+    # Login abgelaufen: genau eine Meldung, keine Handlungsanweisung
+    depot = TRAuthError("abgelaufen")
+    d = await eng2.refresh()
+    assert d["depot"]["error"] == "auth"
+    assert "Login abgelaufen" in sent[-1] and "Säulenwächter-App" in sent[-1]
+    assert d["pillars"]["gold"]["action"] is None
+    await eng2.refresh()
+    assert sum("Login abgelaufen" in s for s in sent) == 1
+
+
+# ------------------------------------------------------------------ Weboberfläche
+
+async def test_web_data_actions_and_login(make_engine, sent, aiohttp_client, monkeypatch):
+    eng = await make_engine()
+    changes = []
+
+    async def changed():
+        changes.append(1)
+
+    client = await aiohttp_client(make_app(eng, changed, allowed=()))
+    assert (await client.get("/api/data")).status == 503  # noch keine Daten
+    html = await (await client.get("/")).text()
+    assert "saeulenwaechter-panel" in html and 'src="saeulenwaechter-card.js"' in html
+    assert (await client.get("/saeulenwaechter-card.js")).status == 200
+
+    r = await client.post("/api/action", json={"action": "refresh"})
+    assert r.status == 200 and changes
+    data = await (await client.get("/api/data")).json()
+    assert set(data["pillars"]) == {"welt", "gold", "anleihen"} and data["login"]["logged_in"] is False
+    assert "events" not in data
+
+    await client.post("/api/action", json={"action": "test"})
+    assert "Testnachricht" in sent[-1]
+    assert (await client.post("/api/action", json={"action": "nope"})).status == 400
+
+    # Login: Eingaben prüfen, App-Bestätigung, Session übernehmen
+    r = await client.post("/api/login/start", json={"phone": "0170 1234567", "pin": "12"})
+    assert r.status == 400
+
+    async def login_start(self, phone, pin):
+        assert phone == "+491701234567" and pin == "7391"
+        return "APP_CONFIRMATION"
+
+    confirmed = {"ok": False}
+
+    async def login_complete(self, code=None, wait=20.0):
+        if not confirmed["ok"]:
+            raise TRAuthError("noch nicht bestätigt")
+        self.cookies = {"tr_session": "s", "tr_refresh": "r"}
+        self.sec_acc_no = "123"
+
+    async def portfolio(self):
+        return {"positions": {}, "cash": 1000.0}
+
+    monkeypatch.setattr(TradeRepublic, "login_start", login_start)
+    monkeypatch.setattr(TradeRepublic, "login_complete", login_complete)
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    r = await client.post("/api/login/start", json={"phone": "0170 1234567", "pin": "7391"})
+    assert (await r.json()) == {"kind": "APP_CONFIRMATION"}
+    r = await client.post("/api/login/complete", json={})
+    assert r.status == 409  # erst in der App bestätigen
+    confirmed["ok"] = True
+    r = await client.post("/api/login/complete", json={})
+    assert r.status == 200
+    status = await (await client.get("/api/login")).json()
+    assert status["logged_in"] and status["phone"] == "+491701234567"
+    assert eng.data["mode"] == "depot" and eng.state["cookies"]["tr_session"] == "s"
+    assert '"7391"' not in json.dumps(eng.state) and "pin" not in eng.state  # die PIN wird nie gespeichert
+
+    await client.post("/api/logout", json={})
+    assert not (await (await client.get("/api/login")).json())["logged_in"]
+    assert eng.data["mode"] == "paper"
+
+
+async def test_web_only_reachable_through_ingress(make_engine, aiohttp_client):
+    eng = await make_engine()
+    client = await aiohttp_client(make_app(eng, allowed=("172.30.32.2",)))
+    assert (await client.get("/api/data")).status == 403
+    assert (await client.get("/")).status == 403
+    assert (await client.get("/api/health")).status == 200  # Watchdog des Supervisors
+
+
+# ------------------------------------------------------------------ Übertragung an Home Assistant
+
+async def test_states_for_home_assistant(make_engine, aiohttp_client):
+    eng = await make_engine()
+    d = await eng.refresh()
+    states = build_states(d)
+    assert states["sensor.saeulenwaechter_welt_zustand"]["state"] == "Investiert"
+    assert states["sensor.saeulenwaechter_anleihen_zustand"]["state"] == "Cash"
+    assert states["binary_sensor.saeulenwaechter_welt_trend"]["state"] == "on"
+    assert states["binary_sensor.saeulenwaechter_rezession_yield_curve"]["state"] == "on"
+    assert states["sensor.saeulenwaechter_modus"]["state"] == "Papierdepot"
+    assert states["binary_sensor.saeulenwaechter_handlung_noetig"]["state"] == "off"
+    assert 99_000 < states["sensor.saeulenwaechter_depotwert"]["state"] < 101_000
+    assert states["sensor.saeulenwaechter_depotwert"]["attributes"]["unit_of_measurement"] == "EUR"
+    json.dumps(states)  # alles serialisierbar
+
+    got = {}
+
+    async def set_state(request: web.Request) -> web.Response:
+        assert request.headers["Authorization"] == "Bearer token"
+        got[request.match_info["entity_id"]] = await request.json()
+        return web.json_response({}, status=201)
+
+    app = web.Application()
+    app.router.add_post("/core/api/states/{entity_id}", set_state)
+    server = await aiohttp_client(app)
+    async with aiohttp.ClientSession() as http:
+        pub = HomeAssistantPublisher(http, token="token", url=str(server.make_url("/core/api")))
+        assert await pub.publish(d) == len(states)
+        assert got["sensor.saeulenwaechter_gold_zustand"]["state"] == "Investiert"
+        assert await HomeAssistantPublisher(http, token="").publish(d) == 0  # ohne Token: nichts

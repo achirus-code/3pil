@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 DOMAIN = "saeulenwaechter"
+ENTITY_PREFIX = "saeulenwaechter"
 NAME = "Säulenwächter"
-VERSION = "1.1.0"
+VERSION = "2.0.0"
 
 # Config-Entry-Daten
-CONF_PHONE = "phone"
-CONF_PIN = "pin"
-CONF_COOKIES = "cookies"
-CONF_DEVICE_ID = "device_id"
-CONF_SEC_ACC_NO = "sec_acc_no"
 CONF_USE_DEPOT = "use_depot"
-CONF_LOGIN_AT = "login_at"
 
 # Optionen
 CONF_TOTAL = "total"

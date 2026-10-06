@@ -1,35 +1,28 @@
-"""DataUpdateCoordinator: lädt Daten, trifft die Monatsentscheidung, führt das Papierdepot
-und meldet neue Erkenntnisse per WhatsApp."""
+"""Engine der App: lädt Daten, trifft die Monatsentscheidung, führt das Papierdepot
+und meldet neue Erkenntnisse per WhatsApp. Läuft ohne Home Assistant; der Zustand liegt in /data/state.json."""
 
 from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import logging
-from datetime import date, datetime, timedelta
+import os
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import aiohttp
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_create_clientsession, async_get_clientsession
-from homeassistant.helpers.storage import Store
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.util import dt as dt_util
 
 from . import strategy as S
 from .const import (
     CANDLE_REFRESH_H,
     CONF_BLS_KEY,
-    CONF_COOKIES,
-    CONF_DEVICE_ID,
     CONF_EXTRA_ISINS,
-    CONF_LOGIN_AT,
     CONF_MONTHLY_REPORT,
     CONF_NOTIFY,
     CONF_REBALANCE_MONTH,
-    CONF_SEC_ACC_NO,
     CONF_SWITCH_WARNING,
     CONF_TOTAL,
     CONF_USE_DEPOT,
@@ -37,7 +30,6 @@ from .const import (
     CONF_WA_PHONE,
     DEFAULT_REBALANCE_MONTH,
     DEFAULT_TOTAL,
-    DOMAIN,
     EQUIVALENT_NAMES,
     EXCHANGE,
     HISTORY_MONTHS,
@@ -55,13 +47,11 @@ from .const import (
     STATE_IN,
     STATE_LABELS,
     STATE_PARKED,
-    STORAGE_VERSION,
     TZ,
-    UPDATE_INTERVAL_MIN,
 )
 from .macro import FETCHERS
 from .notify import send_whatsapp
-from .tr_api import TRAuthError, TradeRepublic
+from .tr_api import TRAuthError, TRError, TradeRepublic
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,26 +90,45 @@ def _date_de(d: date) -> str:
     return f"{d.day}. {MONTHS_DE[d.month - 1]}"
 
 
-class SaeulenCoordinator(DataUpdateCoordinator[dict]):
+def normalize_phone(phone: str) -> str:
+    """„0170 1234567“ → „+491701234567“."""
+    phone = phone.strip().replace(" ", "").replace("-", "")
+    if phone.startswith("00"):
+        phone = "+" + phone[2:]
+    elif phone.startswith("0"):
+        phone = "+49" + phone[1:]
+    elif not phone.startswith("+"):
+        phone = "+" + phone
+    return phone
+
+
+class Engine:
     """Hält den gesamten Zustand des Säulenwächters."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(minutes=UPDATE_INTERVAL_MIN))
-        self.entry = entry
+    def __init__(self, data_dir: Path, options: dict, session: aiohttp.ClientSession,
+                 tr_session: aiohttp.ClientSession | None = None) -> None:
+        self.data_dir = Path(data_dir)
+        self.state_file = self.data_dir / "state.json"
+        self._options = dict(options)
         self.tz = ZoneInfo(TZ)
-        self.store: Store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
         self.state: dict[str, Any] = {}
-        self._tr_session = async_create_clientsession(hass, cookie_jar=aiohttp.DummyCookieJar())
-        self._http = async_get_clientsession(hass)
+        self.data: dict | None = None
+        self._http = session
+        # TR braucht eine Session ohne gemeinsame Cookies (die Cookies führt der Client selbst)
+        self._tr_session = tr_session or session
         self.tr = TradeRepublic(self._tr_session)
-        self._reauth_started = False
+        self._login_client: TradeRepublic | None = None
         self._lock = asyncio.Lock()
+        self.last_error: str | None = None
+
+    def now(self) -> datetime:
+        return datetime.now(self.tz)
 
     # ------------------------------------------------------------------ Setup
 
     @property
     def options(self) -> dict:
-        return {**self.entry.data, **self.entry.options}
+        return self._options
 
     @property
     def extra_isins(self) -> dict[str, list[str]]:
@@ -131,20 +140,18 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
         return bool(self.options.get(CONF_USE_DEPOT, True)) and self.tr.logged_in
 
     async def async_load(self) -> None:
-        self.state = await self.store.async_load() or {}
-        self.state.setdefault("market", {})
-        self.state.setdefault("macro", {})
-        self.state.setdefault("pillars", {})
-        self.state.setdefault("sent", {})
-        if self.state.get("login_at") != self.entry.data.get(CONF_LOGIN_AT):
-            # Neuer Login über den Config-Flow ersetzt die gespeicherte Session
-            self.state["cookies"] = self.entry.data.get(CONF_COOKIES) or {}
-            self.state["sec_acc_no"] = self.entry.data.get(CONF_SEC_ACC_NO)
-            self.state["login_at"] = self.entry.data.get(CONF_LOGIN_AT)
-        cookies = self.state.get("cookies") or {}
-        self.tr = TradeRepublic(self._tr_session, cookies=cookies,
-                                device_id=self.entry.data.get(CONF_DEVICE_ID),
-                                sec_acc_no=self.state.get("sec_acc_no") or self.entry.data.get(CONF_SEC_ACC_NO))
+        try:
+            self.state = json.loads(self.state_file.read_text())
+        except FileNotFoundError:
+            self.state = {}
+        except (OSError, ValueError) as err:
+            _LOGGER.error("Zustand %s nicht lesbar (%s) – starte neu", self.state_file, err)
+            self.state = {}
+        for key in ("market", "macro", "pillars", "sent"):
+            self.state.setdefault(key, {})
+        self.tr = TradeRepublic(self._tr_session, cookies=self.state.get("cookies") or {},
+                                device_id=self.state.get("device_id"), sec_acc_no=self.state.get("sec_acc_no"))
+        self.state["device_id"] = self.tr.device_id
         self._sync_amounts()
 
     def _sync_amounts(self) -> None:
@@ -165,18 +172,68 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
     async def async_save(self) -> None:
         self.state["cookies"] = self.tr.cookies
         self.state["sec_acc_no"] = self.tr.sec_acc_no
-        await self.store.async_save(self.state)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.state_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.state, ensure_ascii=False, default=str))
+        os.replace(tmp, self.state_file)  # atomar: nie eine halb geschriebene Datei
 
-    def update_login(self, cookies: dict, sec_acc_no: str | None) -> None:
-        self.tr.cookies = dict(cookies)
-        self.tr.sec_acc_no = sec_acc_no
-        self._reauth_started = False
+    # --------------------------------------------------------------- Login
+
+    def login_status(self) -> dict:
+        return {"logged_in": self.tr.logged_in, "phone": self.state.get("phone"),
+                "login_at": self.state.get("login_at"),
+                "pending": self._login_client is not None,
+                "use_depot": bool(self.options.get(CONF_USE_DEPOT, True))}
+
+    async def login_start(self, phone: str, pin: str) -> str:
+        """Startet den Web-Login mit einem eigenen Client. Ergebnis: AUTHENTICATOR_VERIFICATION oder APP_CONFIRMATION."""
+        client = TradeRepublic(self._tr_session, device_id=self.state.get("device_id"))
+        kind = await client.login_start(normalize_phone(phone), pin)
+        self._login_client = client
+        self.state["phone"] = normalize_phone(phone)
+        return kind
+
+    async def login_complete(self, code: str | None = None) -> None:
+        """Schließt den Login ab und übernimmt die neue Session in den laufenden Client."""
+        client = self._login_client
+        if client is None:
+            raise TRError("Login wurde nicht gestartet.")
+        await client.login_complete(code=code.strip() if code else None, wait=25)
+        async with self._lock:
+            self.tr.cookies = dict(client.cookies)
+            self.tr.sec_acc_no = client.sec_acc_no
+            self.state["login_at"] = datetime.now(timezone.utc).isoformat()
+            self.state["sent"].pop("auth", None)
+            self._login_client = None
+            await self.async_save()
+        await self.refresh()
+
+    async def logout(self) -> None:
+        async with self._lock:
+            self.tr.cookies = {}
+            self.state["cookies"] = {}
+            self.state["login_at"] = None
+            await self.async_save()
+        await self.refresh()
 
     # --------------------------------------------------------------- Update
 
+    async def refresh(self) -> dict:
+        """Ein vollständiger Durchlauf (Kurse, Wirtschaftsdaten, Depot, Entscheidung, Meldungen)."""
+        try:
+            self.data = await self._async_update_data()
+            self.last_error = None
+        except Exception as err:  # noqa: BLE001 – der Dienst läuft weiter, die Oberfläche zeigt den Fehler
+            _LOGGER.exception("Aktualisierung fehlgeschlagen")
+            self.last_error = str(err)
+        return self.data or {}
+
+    async def async_request_refresh(self) -> None:
+        await self.refresh()
+
     async def _async_update_data(self) -> dict:
         async with self._lock:
-            now = dt_util.now(self.tz)
+            now = self.now()
             await self._update_market(now)
             await self._update_macro(now)
             depot = await self._update_depot()
@@ -257,7 +314,6 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
         try:
             p = await self.tr.portfolio()
             depot.update(p, connected=True)
-            self._reauth_started = False
             # Kurse für Positionen außerhalb der Säulen-Instrumente
             extra = [i for i in p["positions"] if i not in _all_isins()]
             if extra:
@@ -273,9 +329,6 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
         except TRAuthError as err:
             depot["error"] = "auth"
             _LOGGER.warning("Trade-Republic-Login abgelaufen: %s", err)
-            if not self._reauth_started:
-                self._reauth_started = True
-                self.entry.async_start_reauth(self.hass)
         except Exception as err:  # noqa: BLE001
             depot["error"] = str(err)
             _LOGGER.warning("Depot nicht geladen: %s", err)
@@ -432,15 +485,18 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
         overview = S.pillars_overview(values, amounts)
         # Verteilung bei Trade Republic: nur erkannte Positionen + Cash, gegen das Soll laut Strategie
         split = None
-        if mode == "depot" and depot.get("connected"):
+        if mode == "paper" or depot.get("connected"):
             tr_values = {k: sum(h.get("value") or 0 for h in holdings.get(k, [])) for k in pillars}
             soll = {r["key"]: r["soll"] for r in overview["rows"]}
             targets = {k: (p["st"].get("target") if p["st"].get("month") else p["res"].get("target"))
                        for k, p in pillars.items()}
-            split = S.tr_split(tr_values, targets, soll, depot.get("cash"),
+            # Papierdepot: Cash ist, was die Säulen ohne Position gerade halten (Erlös bzw. Betrag)
+            cash = depot.get("cash") if mode == "depot" else sum(values[k] for k in pillars if not holdings.get(k))
+            split = S.tr_split(tr_values, targets, soll, cash,
                                sum(u.get("value") or 0 for u in unassigned),
                                {k: [{"isin": h["isin"], "name": h["name"], "value": h.get("value") or 0}
                                     for h in holdings.get(k, [])] for k in pillars})
+            split["source"] = mode
         for row in overview["rows"]:
             row["name"] = out_pillars[row["key"]]["name"]
             row["color"] = out_pillars[row["key"]]["color"]
@@ -779,8 +835,8 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
         auth_fp = "expired" if data["depot"]["error"] == "auth" else "ok"
         if self.options.get(CONF_USE_DEPOT, True):
             out.append(("auth", auth_fp,
-                        "🔑 Trade-Republic-Login abgelaufen – bitte in Home Assistant unter "
-                        "Einstellungen › Geräte & Dienste › Säulenwächter neu anmelden."
+                        "🔑 Trade-Republic-Login abgelaufen – bitte in der Säulenwächter-App "
+                        "(Seitenleiste in Home Assistant) neu anmelden."
                         if auth_fp == "expired" else None))
         return out
 
@@ -818,7 +874,7 @@ class SaeulenCoordinator(DataUpdateCoordinator[dict]):
             _LOGGER.info("WhatsApp nicht eingerichtet – Nachricht verworfen:\n%s", body)
             return False
         text = body if body.startswith("🏛️") else f"🏛️ *{NAME}*\n\n{body}"
-        self.state.setdefault("log", []).append({"time": dt_util.now().isoformat(), "text": text})
+        self.state.setdefault("log", []).append({"time": self.now().isoformat(), "text": text})
         self.state["log"] = self.state["log"][-30:]
         return await send_whatsapp(self._http, phone, apikey, text)
 

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Säulenwächter</title>
+<style>
+  :root {
+    --primary-text-color:#1c1c1e; --secondary-text-color:#6e6e73; --divider-color:#e5e5ea;
+    --primary-color:#03a9f4; --card-background-color:#fff; --page:#f2f2f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --primary-text-color:#f2f2f7; --secondary-text-color:#a1a1a6; --divider-color:#38383a;
+      --card-background-color:#1c1c1e; --page:#000;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); color:var(--primary-text-color);
+         font:14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width:1200px; margin:0 auto; padding:16px; }
+  .login { background:var(--card-background-color); border-radius:12px; padding:16px; margin-bottom:16px;
+           box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  .login h2 { margin:0 0 6px; font-size:16px; }
+  .login p { margin:0 0 10px; color:var(--secondary-text-color); }
+  .login .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .login input { font:inherit; padding:8px 10px; border:1px solid var(--divider-color); border-radius:8px;
+                 background:transparent; color:inherit; min-width:0; }
+  .login button { font:inherit; font-weight:600; padding:8px 14px; border:0; border-radius:8px; cursor:pointer;
+                  background:var(--primary-color); color:#fff; }
+  .login button.ghost { background:transparent; color:var(--primary-color); border:1px solid var(--divider-color); }
+  .login .err { color:#ff3b30; margin-top:8px; }
+  .login .ok { color:#34c759; }
+  .hidden { display:none !important; }
+</style>
+<script>
+  // Minimaler Ersatz für die Home-Assistant-Elemente, die die Karte benutzt
+  customElements.define("ha-card", class extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: "open" }).innerHTML =
+        `<style>:host{display:block;background:var(--card-background-color);border-radius:12px;
+          box-shadow:0 1px 3px rgba(0,0,0,.12);overflow:hidden}</style><slot></slot>`;
+    }
+  });
+  const ICONS = {
+    "mdi:check-circle": "●", "mdi:close-circle": "✕", "mdi:check-circle-outline": "✓", "mdi:alert": "⚠",
+    "mdi:circle-outline": "○", "mdi:help-circle-outline": "?", "mdi:alert-octagon": "⛔", "mdi:calendar-clock": "📅",
+    "mdi:pillar": "🏛️", "mdi:swap-vertical-bold": "⇅",
+  };
+  customElements.define("ha-icon", class extends HTMLElement {
+    connectedCallback() {
+      this.style.display = "inline-flex";
+      this.style.justifyContent = "center";
+      this.style.fontSize = "var(--mdc-icon-size, 18px)";
+      this.textContent = ICONS[this.getAttribute("icon")] || "•";
+    }
+  });
+</script>
+<script src="saeulenwaechter-card.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div id="login" class="login hidden">
+    <h2>Trade-Republic-Login</h2>
+    <p id="login-hint">Telefonnummer und 4-stellige PIN. Die PIN wird nicht gespeichert, nur die Web-Session.
+      Ohne Login rechnet der Säulenwächter mit einem Papierdepot.</p>
+    <div id="step-start" class="row">
+      <input id="phone" type="tel" placeholder="Telefonnummer (+49…)" autocomplete="tel">
+      <input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN" autocomplete="off" size="6">
+      <button id="btn-start">Anmelden</button>
+    </div>
+    <div id="step-code" class="row hidden">
+      <input id="code" inputmode="numeric" placeholder="Code aus der Authenticator-App" autocomplete="one-time-code">
+      <button id="btn-code">Bestätigen</button>
+    </div>
+    <div id="step-confirm" class="row hidden">
+      <span>Trade Republic hat eine Anfrage an dein Smartphone geschickt. Bitte in der App bestätigen.</span>
+      <button id="btn-confirm">Bestätigt</button>
+    </div>
+    <div id="login-msg" class="err"></div>
+  </div>
+  <saeulenwaechter-panel id="panel"></saeulenwaechter-panel>
+  <div class="login" style="margin-top:16px">
+    <div class="row">
+      <span id="login-state" style="flex:1"></span>
+      <button id="btn-login" class="ghost">Bei Trade Republic anmelden</button>
+      <button id="btn-logout" class="ghost hidden">Abmelden</button>
+    </div>
+  </div>
+</div>
+<script>
+  // Alle Pfade relativ: Ingress hängt einen eigenen Präfix davor.
+  async function api(path, body) {
+    const r = await fetch(path, body === undefined ? { cache: "no-store" } :
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  }
+  const hass = {
+    states: {},
+    callWS: async (msg) => {
+      if (msg.type === "saeulenwaechter/data") return api("api/data");
+      if (msg.type === "saeulenwaechter/action") { const r = await api("api/action", { action: msg.action }); status(); return r; }
+      throw new Error("unbekannt: " + msg.type);
+    },
+  };
+  const $ = (id) => document.getElementById(id);
+  const show = (id, on) => $(id).classList.toggle("hidden", !on);
+  const panel = $("panel");
+
+  function step(name) {
+    for (const s of ["start", "code", "confirm"]) show("step-" + s, s === name);
+  }
+  async function status() {
+    let s;
+    try { s = await api("api/login"); } catch (e) { return; }
+    $("login-state").innerHTML = s.logged_in
+      ? `<span class="ok">● Trade Republic verbunden</span>${s.phone ? " · " + s.phone : ""}`
+      : "Nicht bei Trade Republic angemeldet – Papierdepot.";
+    show("btn-login", !s.logged_in);
+    show("btn-logout", s.logged_in);
+    if (s.phone && !$("phone").value) $("phone").value = s.phone;
+  }
+  async function guarded(fn) {
+    $("login-msg").textContent = "";
+    try { await fn(); } catch (e) { $("login-msg").textContent = e.message; }
+  }
+  $("btn-login").onclick = () => { show("login", true); step("start"); $("phone").focus(); };
+  $("btn-start").onclick = () => guarded(async () => {
+    const r = await api("api/login/start", { phone: $("phone").value, pin: $("pin").value });
+    $("pin").value = "";
+    step(r.kind === "AUTHENTICATOR_VERIFICATION" ? "code" : "confirm");
+  });
+  const done = async () => { show("login", false); panel._load && panel._load(); await status(); };
+  $("btn-code").onclick = () => guarded(async () => { await api("api/login/complete", { code: $("code").value }); await done(); });
+  $("btn-confirm").onclick = () => guarded(async () => {
+    $("login-msg").textContent = "Warte auf die Bestätigung …";
+    await api("api/login/complete", {});
+    await done();
+  });
+  $("btn-logout").onclick = () => guarded(async () => {
+    if (!confirm("Trade-Republic-Session löschen? Danach rechnet der Säulenwächter mit dem Papierdepot.")) return;
+    await api("api/logout", {});
+    await done();
+  });
+
+  panel.hass = hass;
+  status();
+  // abgelaufener Login: Anmeldung direkt anbieten
+  setInterval(async () => {
+    const d = panel._data;
+    if (d && d.depot && d.depot.error === "auth") show("login", true);
+  }, 5000);
+</script>
+</body>
+</html>
