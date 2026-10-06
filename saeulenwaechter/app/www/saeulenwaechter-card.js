@@ -93,6 +93,7 @@ const STYLE = `
   .modal-x { position:absolute; top:10px; right:10px; border:0; background:transparent; color:var(--secondary-text-color); font-size:18px; cursor:pointer; }
   .modal-box > .label:first-of-type { margin-top:0 !important; }
   .note.ok { color:var(--sw-green); }
+  pre.diag { font-size:11px; white-space:pre-wrap; user-select:text; max-height:240px; overflow:auto; }
   details.trades { font-size:12px; }
   details.trades summary { cursor:pointer; color:var(--primary-color); }
   details.trades table { width:100%; border-collapse:collapse; margin-top:4px; }
@@ -426,7 +427,8 @@ class SaeulenBase extends HTMLElement {
       ? `<div class="note ok">✓ Kaufhistorie vollständig: Alle heutigen Stücke sind durch erkannte Käufe/Verkäufe erklärt.</div>`
       : `<div class="note warn">⚠ Kaufhistorie unvollständig – für diese Stücke ist kein Kauf bekannt; sie werden so gerechnet, als lägen sie schon vor Beginn im Depot (Gewinn davor ist dann nur eine Annahme):
           ${cov.map((c) => `<br>· ${esc(c.name)}: ${c.missing.toLocaleString("de-DE", { maximumFractionDigits: 3 })} von ${c.size.toLocaleString("de-DE", { maximumFractionDigits: 3 })} Stück${c.first ? ` (erster erkannter Kauf ${new Date(c.first).toLocaleDateString("de-DE")})` : " (keine Käufe erkannt)"}`).join("")}
-          ${d.mode === "depot" ? "<br>Einmal „Neu synchronisieren“ lädt die Käufe neu." : ""}</div>`;
+          ${d.mode === "depot" ? "<br>Einmal „Neu synchronisieren“ lädt die Käufe neu." : ""}</div>
+          ${perf.diag ? `<details class="trades"><summary>Diagnose Zeitleiste (zum Weitergeben)</summary><pre class="diag">${esc(JSON.stringify(perf.diag, null, 1))}</pre></details>` : ""}`;
     return `<div class="modal" data-perf-close>
       <div class="modal-box" role="dialog" aria-label="Wertentwicklung">
         <button class="modal-x" data-perf-close aria-label="Schließen">✕</button>

@@ -213,4 +213,9 @@ async def test_transactions_from_timeline():
     tr = client(answer)
     trades = await tr.transactions(isins={"IE00B3YLTY66"})
     assert [(t["id"], t["date"], t["amount"], t["shares"]) for t in trades] == [
-        ("t1", "2026-09-21", -450.0, pytest.approx(38.123456)), ("t3", "2026-07-10", 1200.5, -100.0)]
+        ("t1", "2026-09-21", -450.0, pytest.approx(38.123456)), ("t3", "2026-07-10", 1200.5, -100.0),
+        ("n1", "2026-04-01", -50.0, None)]  # Kauf ohne Stückzahl: wird später aus Betrag und Kurs geschätzt
+    assert trades[2]["estimated"]
+    diag = tr.last_timeline
+    assert diag["pages"] == 2 and diag["items"] == 8 and diag["held"] == 7 and diag["skipped"] == 2
+    assert diag["with_shares"] == 2 and diag["estimated"] == 1 and "Anteile" in diag["detail_titles"]
