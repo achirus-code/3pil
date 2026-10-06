@@ -260,7 +260,7 @@ class SaeulenBase extends HTMLElement {
     if (!z) return "";
     if (z.rate == null) return `<div class="note">Zinsen auf Cash: Satz noch unbekannt – kommt beim nächsten Abgleich mit Trade Republic.</div>`;
     const rate = `${(z.rate * 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % p. a.`;
-    const src = z.source === "option" ? "eigener Wert" : "laut Trade Republic";
+    const src = { option: "eigener Wert", trade_republic: "laut Trade Republic", ezb: "EZB-Einlagensatz, den Trade Republic in der Regel zahlt" }[z.source] || "";
     const earned = z.earned ? ` · bisher gutgeschrieben ${eur(z.earned, 2)}` : "";
     return `<div class="interest"><span>💶 Zinsen auf Cash</span>
       <b>${rate}</b> <span class="muted">(${src})</span> auf ${eur(z.cash, 0)} ≈ <b>${eur(z.per_year, 0)} im Jahr</b>${earned}</div>`;
@@ -268,11 +268,13 @@ class SaeulenBase extends HTMLElement {
 
   rebalanceTable(rows) {
     const pc = (v) => `${(v * 100).toLocaleString("de-DE", { maximumFractionDigits: 1 })} %`;
+    // Eine Säule in Cash hält ihr Geld als Guthaben: da wird nichts ge- oder verkauft, nur Cash umgeschichtet
     const move = (r) => Math.abs(r.delta) < 1 ? "passt"
-      : `${r.delta > 0 ? (r.cash ? "Cash +" : "kaufen ") : "verkaufen "}${eur(Math.abs(r.delta), 0)}`;
+      : r.cash ? `${r.delta > 0 ? "als Cash halten +" : "aus Cash nehmen "}${eur(Math.abs(r.delta), 0)}`
+      : `${r.delta > 0 ? "kaufen " : "verkaufen "}${eur(Math.abs(r.delta), 0)}`;
     return `<table class="alarm-table">
       <tr><th>Säule</th><th class="num">Ist</th><th class="num">Ziel</th><th class="num">Anteil</th><th>Umsetzen</th></tr>
-      ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${eur(r.value, 0)}</td>
+      ${rows.map((r) => `<tr><td>${esc(r.name)}${r.cash ? `<br><small>in Cash</small>` : ""}</td><td class="num">${eur(r.value, 0)}</td>
         <td class="num">${eur(r.target_value, 0)}</td><td class="num">${pc(r.ist)} → ${pc(r.soll)}</td>
         <td class="mv">${move(r)}</td></tr>`).join("")}
     </table>`;
@@ -285,7 +287,7 @@ class SaeulenBase extends HTMLElement {
     const signed = (v) => v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
     const t = st.total;
     const row = (r) => `<tr>
-        <td>${esc(r.name)}</td>
+        <td>${esc(r.name)}${r.invested === false && r.value ? ` <span class="muted">· in Cash</span>` : ""}</td>
         <td class="num">${eur(r.value, 0)}</td>
         <td class="num">${r.cost != null ? eur(r.cost, 0) : (r.invested === false ? "Cash" : "–")}</td>
         <td class="num" style="color:${color(r.pnl)}">${signed(r.pnl)}</td>

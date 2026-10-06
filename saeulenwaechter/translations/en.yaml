@@ -34,3 +34,6 @@ configuration:
   cash_zins:
     name: Interest rate on cash in % (optional)
     description: Leave empty to use the rate Trade Republic reports on each sync. Your own value (e.g. 2.0) takes precedence.
+  cash_reserve:
+    name: Cash reserve outside the strategy (€)
+    description: This part of your Trade Republic cash does not count towards the strategy (e.g. emergency fund). 0 = all cash belongs to the strategy.
