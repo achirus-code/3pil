@@ -7,11 +7,13 @@ c[k] der Schluss vor k Monaten.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from typing import Any
 
 from .const import (
     CASH_RATE,
+    EQUIVALENTS,
     DRIFT_THRESHOLD_PP,
     MOMENTUM_MONTHS,
     MONTHS_DE,
@@ -497,3 +499,113 @@ def pillars_overview(values: dict[str, float], amounts: dict[str, float]) -> dic
                      "diff_pp": diff_pp, "target_value": soll * total_value})
     due = drift >= DRIFT_THRESHOLD_PP
     return {"rows": rows, "total": total_value, "drift_pp": drift, "due": due}
+
+
+# ---------------------------------------------------------------------------
+# Depotpositionen erkennen (nach dem TR-Login)
+# ---------------------------------------------------------------------------
+
+ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+
+
+def parse_isins(text: str | None) -> list[str]:
+    """„IE000VAHT5T0, ie00b4l5y983“ → gültige ISINs in Großbuchstaben, ohne Doppelte."""
+    out: list[str] = []
+    for part in re.split(r"[\s,;]+", text or ""):
+        part = part.strip().upper()
+        if ISIN_RE.match(part) and part not in out:
+            out.append(part)
+    return out
+
+
+def resolve_isin(isin: str, pillars: list[dict], extras: dict[str, list[str]] | None = None) -> str | None:
+    """Das Säulen-Instrument, für das eine Depot-ISIN zählt.
+
+    Reihenfolge: ein Instrument der Säulen selbst, ein gleichwertiges Produkt aus dem Katalog,
+    eine eigene Zusatz-ISIN (zählt wie das eigene Instrument der Säule). Sonst None.
+    """
+    for cfg in pillars:
+        if isin in (cfg["isin"], cfg.get("hedged"), *cfg.get("fallbacks", [])):
+            return isin
+    if isin in EQUIVALENTS:
+        return EQUIVALENTS[isin]
+    for cfg in pillars:
+        if isin in (extras or {}).get(cfg["key"], []):
+            return cfg["isin"]
+    return None
+
+
+def suggest_pillar(name: str | None, tags: list[str] | None = None) -> str | None:
+    """Vorschlag für eine unbekannte Position anhand von Name und TR-Tags (nur als Hinweis)."""
+    n = (name or "").lower()
+    if "gold" in n and not any(w in n for w in ("miner", "producer", "mining", "explorer", "bergbau")):
+        return "gold"
+    if "governmentbonds" in (tags or []) or any(w in n for w in ("gov bond", "govt bond", "government bond",
+                                                                  "staatsanleihe", "treasury")):
+        return "anleihen"
+    if any(w in n for w in ("all-world", "all world", "all country", "acwi", "msci world", "developed world",
+                            "global all-cap", "global all cap")):
+        return "welt"
+    return None
+
+
+def tr_split(pillar_values: dict[str, float], targets: dict[str, str | None], soll: dict[str, float],
+             cash: float | None, unassigned_value: float = 0.0,
+             parts: dict[str, list[dict]] | None = None) -> dict:
+    """Verteilung im TR-Depot (Ist) gegen die Verteilung laut Strategie (Soll).
+
+    Basis = erkannte Säulen-Positionen + Cash. Eine Säule, deren Ziel Cash ist, soll 0 % in Wertpapieren
+    halten; ihr Anteil gehört dann zum Soll-Cash.
+    """
+    cash = max(cash or 0.0, 0.0)
+    base = sum(pillar_values.values()) + cash
+    rows = []
+    for key, value in pillar_values.items():
+        target_share = soll.get(key, 0.0) if targets.get(key) else 0.0
+        # einzelne Produkte der Säule (z. B. zwei Welt-ETFs) als Teile des Balkens
+        segs = [{"isin": h["isin"], "name": h["name"], "value": h["value"],
+                 "ist": h["value"] / base if base else 0.0}
+                for h in (parts or {}).get(key, []) if h.get("value")]
+        rows.append({"key": key, "value": value, "ist": value / base if base else 0.0, "soll": target_share,
+                     "parts": segs})
+    soll_cash = sum(soll.get(k, 0.0) for k in pillar_values if not targets.get(k))
+    return {"base": base, "rows": rows,
+            "cash": {"value": cash, "ist": cash / base if base else 0.0, "soll": soll_cash},
+            "unassigned_value": unassigned_value}
+
+
+
+def pillar_stats(pillars: list[dict]) -> dict:
+    """Statistik der Säulen: Wert, Einstand, Gewinn/Verlust je Säule und gesamt.
+
+    pillars: [{key, name, value, held: [{cost, value}]}]. Gewinn/Verlust nur für offene Positionen mit
+    bekanntem Einstand und Kurs; eine Säule in Cash zählt mit ihrem Wert, aber ohne Gewinn/Verlust.
+    """
+    rows = []
+    for p in pillars:
+        held = p.get("held") or []
+        known = held and all(h.get("cost") and h.get("value") is not None for h in held)
+        cost = sum(h["cost"] for h in held) if known else None
+        pos_value = sum(h["value"] for h in held) if known else None
+        pnl = pos_value - cost if known else None
+        rows.append({"key": p["key"], "name": p["name"], "value": p.get("value"), "cost": cost,
+                     "pnl": pnl, "pnl_pct": pnl / cost if known and cost else None, "invested": bool(held)})
+    with_pnl = [r for r in rows if r["pnl"] is not None]
+    cost = sum(r["cost"] for r in with_pnl)
+    pnl = sum(r["pnl"] for r in with_pnl)
+    return {"rows": rows, "total": {"value": sum(r["value"] or 0 for r in rows), "cost": cost if with_pnl else None,
+                                    "pnl": pnl if with_pnl else None, "pnl_pct": pnl / cost if cost else None}}
+
+
+
+def record_history(history: list[dict], day: str, stats: dict, mode: str, max_days: int = 730) -> list[dict]:
+    """Tagesverlauf der Säulen: ein Eintrag je Tag (der letzte Stand des Tages gewinnt), höchstens max_days."""
+    t = stats["total"]
+    entry = {"date": day, "mode": mode, "value": round(t["value"], 2),
+             "cost": round(t["cost"], 2) if t.get("cost") is not None else None,
+             "pnl": round(t["pnl"], 2) if t.get("pnl") is not None else None,
+             "pillars": {r["key"]: round(r["value"] or 0, 2) for r in stats["rows"]}}
+    out = [h for h in history if h["date"] != day]
+    out.append(entry)
+    out.sort(key=lambda h: h["date"])
+    return out[-max_days:]

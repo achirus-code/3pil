@@ -4,7 +4,7 @@ from __future__ import annotations
 
 DOMAIN = "saeulenwaechter"
 NAME = "Säulenwächter"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # Config-Entry-Daten
 CONF_PHONE = "phone"
@@ -25,6 +25,8 @@ CONF_MONTHLY_REPORT = "monthly_report"
 CONF_SWITCH_WARNING = "switch_warning"
 CONF_REBALANCE_MONTH = "rebalance_month"
 CONF_BLS_KEY = "bls_key"
+# Eigene Zusatz-ISINs je Säule (zählen wie das eigene Instrument der Säule)
+CONF_EXTRA_ISINS = {"welt": "extra_welt", "gold": "extra_gold", "anleihen": "extra_anleihen"}
 
 DEFAULT_TOTAL = 100_000.0
 DEFAULT_REBALANCE_MONTH = 1  # Januar
@@ -119,3 +121,47 @@ MACRO_MAX_AGE_DAYS = 40
 
 STORAGE_VERSION = 1
 SIGNAL_UPDATE = f"{DOMAIN}_update"
+
+# Gleichwertige Produkte: ISIN im Depot → Säulen-Instrument, für das sie zählt.
+# Alle ISINs am 6.10.2026 bei Trade Republic geprüft (Instrumentdaten, handelbar an der LSX).
+EQUIVALENTS: dict[str, str] = {
+    # Welt – zählen wie SPDR MSCI ACWI IMI
+    "IE000VAHT5T0": "IE00B3YLTY66",  # Vanguard FTSE Global All-Cap (Acc)
+    "IE000CVUM3N6": "IE00B3YLTY66",  # Vanguard FTSE Global All-Cap (Dist)
+    "IE00BK5BQT80": "IE00B3YLTY66",  # Vanguard FTSE All-World (Acc)
+    "IE00B3RBWM25": "IE00B3YLTY66",  # Vanguard FTSE All-World (Dist)
+    "IE00B6R52259": "IE00B3YLTY66",  # iShares MSCI ACWI (Acc)
+    "IE00B4L5Y983": "IE00B3YLTY66",  # iShares Core MSCI World (Acc)
+    "IE00BFY0GT14": "IE00B3YLTY66",  # SPDR MSCI World (Acc)
+    "IE00BKX55T58": "IE00B3YLTY66",  # Vanguard FTSE Developed World (Dist)
+    # Welt gesichert – zählt wie SPDR MSCI ACWI EUR Hedged
+    "IE00B441G979": "IE00BF1B7389",  # iShares MSCI World EUR Hedged
+    # Gold – zählen wie Xetra-Gold
+    "JE00BN2CJ301": "DE000A0S9GB0",  # WisdomTree Core Physical Gold
+    "JE00B1VS3770": "DE000A0S9GB0",  # WisdomTree Physical Gold
+    "DE000EWG2LD7": "DE000A0S9GB0",  # EUWAX Gold II
+    "IE00B4ND3602": "DE000A0S9GB0",  # iShares Physical Gold
+    "IE00B579F325": "DE000A0S9GB0",  # Invesco Physical Gold
+    # Anleihen – zählen wie Xtrackers Eurozone Government Bond
+    "IE00B4WXJJ64": "LU0290355717",  # iShares Core Euro Government Bond
+    "IE00BH04GL39": "LU0290355717",  # Vanguard EUR Eurozone Government Bond
+}
+
+EQUIVALENT_NAMES: dict[str, str] = {
+    "IE000VAHT5T0": "Vanguard FTSE Global All-Cap (Acc)",
+    "IE000CVUM3N6": "Vanguard FTSE Global All-Cap (Dist)",
+    "IE00BK5BQT80": "Vanguard FTSE All-World (Acc)",
+    "IE00B3RBWM25": "Vanguard FTSE All-World (Dist)",
+    "IE00B6R52259": "iShares MSCI ACWI",
+    "IE00B4L5Y983": "iShares Core MSCI World",
+    "IE00BFY0GT14": "SPDR MSCI World",
+    "IE00BKX55T58": "Vanguard FTSE Developed World",
+    "IE00B441G979": "iShares MSCI World EUR Hedged",
+    "JE00BN2CJ301": "WisdomTree Core Physical Gold",
+    "JE00B1VS3770": "WisdomTree Physical Gold",
+    "DE000EWG2LD7": "EUWAX Gold II",
+    "IE00B4ND3602": "iShares Physical Gold",
+    "IE00B579F325": "Invesco Physical Gold",
+    "IE00B4WXJJ64": "iShares Core Euro Government Bond",
+    "IE00BH04GL39": "Vanguard EUR Eurozone Government Bond",
+}

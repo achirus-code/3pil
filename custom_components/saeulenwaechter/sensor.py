@@ -118,7 +118,8 @@ GLOBAL_SENSORS: list[SaeulenSensorDescription] = [
         value_fn=lambda p, d: _round(d["overview"]["total"]),
         attrs_fn=lambda p, d: {"modus": d.get("mode"), "cash": d["depot"].get("cash"),
                                "saeulen": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()}
-                                           for r in d["overview"]["rows"]]},
+                                           for r in d["overview"]["rows"]],
+                               "statistik": d.get("stats")},
     ),
     SaeulenSensorDescription(
         key="drift", name="Abweichung", icon="mdi:scale-unbalanced",
@@ -149,6 +150,8 @@ GLOBAL_SENSORS: list[SaeulenSensorDescription] = [
         value_fn=lambda p, d: "Echtes Depot" if d.get("mode") == "depot" else "Papierdepot",
         attrs_fn=lambda p, d: {"tr_verbunden": d["depot"].get("connected"), "fehler": d["depot"].get("error"),
                                "positionen": d["depot"].get("positions"),
+                               "nicht_zugeordnet": d["depot"].get("unassigned"),
+                               "tr_verteilung": d.get("tr_split"),
                                "kursdaten_fehler": d.get("market_error"),
                                "wirtschaftsdaten": d.get("macro_status")},
     ),

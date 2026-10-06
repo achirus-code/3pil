@@ -177,3 +177,87 @@ def test_german_formatting():
     assert S.fmt_eur(41020.6, 0) == "41.021 €"
     assert S.fmt_pct(-0.029) == "−2,9 %"
     assert S.month_label("2026-10") == "Okt. 2026"
+
+
+# --- Depotpositionen nach dem Login erkennen -------------------------------------------------
+
+def test_parse_isins_cleans_user_input():
+    assert S.parse_isins(" ie000vaht5t0, JE00BN2CJ301;foo  IE000VAHT5T0\nDE000A0S9GB0") == [
+        "IE000VAHT5T0", "JE00BN2CJ301", "DE000A0S9GB0"]
+    assert S.parse_isins(None) == []
+
+
+def test_resolve_isin_own_equivalent_extra_and_unknown():
+    # eigene Instrumente der Säulen (auch gesichert und Ausweichziele)
+    assert S.resolve_isin("IE00B3YLTY66", PILLARS) == "IE00B3YLTY66"
+    assert S.resolve_isin("LU1407888137", PILLARS) == "LU1407888137"
+    # gleichwertige Produkte aus dem Katalog
+    assert S.resolve_isin("IE000VAHT5T0", PILLARS) == "IE00B3YLTY66"  # Vanguard FTSE Global All-Cap
+    assert S.resolve_isin("JE00BN2CJ301", PILLARS) == "DE000A0S9GB0"  # WisdomTree Core Physical Gold
+    assert S.resolve_isin("IE00B441G979", PILLARS) == "IE00BF1B7389"  # MSCI World EUR Hedged
+    assert S.resolve_isin("IE00BH04GL39", PILLARS) == "LU0290355717"  # Vanguard Eurozone Gov Bond
+    # eigene Zusatz-ISIN zählt wie das eigene Instrument der Säule
+    assert S.resolve_isin("IE00BKM4GZ66", PILLARS, {"welt": ["IE00BKM4GZ66"]}) == "IE00B3YLTY66"
+    assert S.resolve_isin("US0378331005", PILLARS) is None
+
+
+def test_held_equivalent_counts_as_target_no_switch():
+    held = [S.resolve_isin("IE000VAHT5T0", PILLARS)]
+    assert S.plan_action(held, "IE00B3YLTY66") == "hold"
+    assert S.plan_action(held, "IE00BF1B7389") == "switch"  # Dollar fällt: gesicherte Klasse
+
+
+def test_suggest_pillar_for_unknown_positions():
+    assert S.suggest_pillar("Physical Gold USD", ["invesco"]) == "gold"
+    assert S.suggest_pillar("iShares Gold Producers") is None
+    assert S.suggest_pillar("Core Euro Gov Bond EUR (Dist)", ["governmentbonds"]) == "anleihen"
+    assert S.suggest_pillar("MSCI World USD (Acc)") == "welt"
+    assert S.suggest_pillar("Apple Inc.") is None
+
+
+def test_tr_split_against_the_decision():
+    values = {"welt": 41_000.0, "gold": 31_000.0, "anleihen": 0.0}
+    split = S.tr_split(values, {"welt": "IE00B3YLTY66", "gold": "DE000A0S9GB0", "anleihen": None},
+                       {"welt": 0.4, "gold": 0.3, "anleihen": 0.3}, cash=28_000.0, unassigned_value=500.0)
+    assert split["base"] == 100_000.0
+    rows = {r["key"]: r for r in split["rows"]}
+    assert rows["welt"]["ist"] == pytest.approx(0.41) and rows["welt"]["soll"] == 0.4
+    assert rows["anleihen"]["soll"] == 0.0  # Ziel Cash: keine Wertpapiere
+    assert split["cash"]["ist"] == pytest.approx(0.28) and split["cash"]["soll"] == pytest.approx(0.3)
+    assert split["unassigned_value"] == 500.0
+
+
+def test_tr_split_shows_each_product_of_a_pillar():
+    parts = {"welt": [{"isin": "IE00B3YLTY66", "name": "SPYI", "value": 20_000.0},
+                      {"isin": "IE000VAHT5T0", "name": "Vanguard", "value": 20_000.0}]}
+    split = S.tr_split({"welt": 40_000.0}, {"welt": "IE00B3YLTY66"}, {"welt": 1.0}, cash=60_000.0, parts=parts)
+    row = split["rows"][0]
+    assert row["ist"] == pytest.approx(0.4)
+    assert [p["ist"] for p in row["parts"]] == [pytest.approx(0.2), pytest.approx(0.2)]
+
+
+def test_pillar_stats_value_cost_and_profit():
+    st = S.pillar_stats([
+        {"key": "welt", "name": "Welt", "value": 44_000.0,
+         "held": [{"cost": 30_000.0, "value": 33_000.0}, {"cost": 10_000.0, "value": 11_000.0}]},
+        {"key": "gold", "name": "Gold", "value": 27_000.0, "held": [{"cost": 30_000.0, "value": 27_000.0}]},
+        {"key": "anleihen", "name": "Anleihen", "value": 30_000.0, "held": []},
+    ])
+    rows = {r["key"]: r for r in st["rows"]}
+    assert rows["welt"]["pnl"] == 4_000.0 and rows["welt"]["pnl_pct"] == pytest.approx(0.1)
+    assert rows["gold"]["pnl"] == -3_000.0
+    assert rows["anleihen"]["pnl"] is None and rows["anleihen"]["invested"] is False
+    assert st["total"] == {"value": 101_000.0, "cost": 70_000.0, "pnl": 1_000.0, "pnl_pct": pytest.approx(1 / 70)}
+
+
+def test_record_history_one_entry_per_day_and_capped():
+    stats = {"total": {"value": 100.0, "cost": 90.0, "pnl": 10.0},
+             "rows": [{"key": "welt", "value": 60.0}, {"key": "gold", "value": 40.0}]}
+    h = S.record_history([], "2026-10-06", stats, "depot")
+    stats2 = {"total": {"value": 101.0, "cost": None, "pnl": None}, "rows": [{"key": "welt", "value": 101.0}]}
+    h = S.record_history(h, "2026-10-06", stats2, "depot")  # später am selben Tag: ersetzt
+    assert len(h) == 1 and h[0]["value"] == 101.0 and h[0]["cost"] is None
+    for day in ("2026-10-08", "2026-10-07"):
+        h = S.record_history(h, day, stats, "depot", max_days=2)
+    assert [x["date"] for x in h] == ["2026-10-07", "2026-10-08"]
+    assert h[-1]["pillars"] == {"welt": 60.0, "gold": 40.0}

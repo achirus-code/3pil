@@ -17,6 +17,7 @@ const STATE_ICONS = {
 const MONTH_COLORS = { in: "var(--sw-green)", hedged: "var(--sw-blue)", parked: "var(--sw-teal)", cash: "var(--sw-grey)" };
 const MONTH_LABELS = { in: "Investiert", hedged: "Gesichert", parked: "Ausgewichen", cash: "Cash" };
 const MONTHS = ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sep.", "Okt.", "Nov.", "Dez."];
+const TR_SHADES = ["#af52de", "#ff2d92", "#5e5ce6", "#bf5af2", "#ff6482"];
 const ACTION_COLORS = { buy: "var(--sw-green)", sell: "var(--sw-red)", switch: "var(--sw-orange)" };
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -29,7 +30,7 @@ const pct = (v, d = 1, sign = true) => {
 const monthLabel = (k) => { if (!k) return "–"; const [y, m] = k.split("-"); return `${MONTHS[+m - 1]} ${y}`; };
 
 const STYLE = `
-  :host { --sw-green:#34c759; --sw-red:#ff3b30; --sw-orange:#ff9500; --sw-blue:#0a84ff; --sw-teal:#30b0c7;
+  :host { --sw-green:#34c759; --sw-red:#ff3b30; --sw-orange:#ff9500; --sw-blue:#0a84ff; --sw-teal:#30b0c7; --sw-tr:#af52de;
           --sw-grey:rgba(142,142,147,.4); display:block; }
   .num { font-variant-numeric: tabular-nums; }
   ha-card { overflow:hidden; }
@@ -64,6 +65,33 @@ const STYLE = `
   .bar { position:relative; height:5px; border-radius:3px; background:var(--divider-color); margin:5px 0 3px; }
   .bar .fill { position:absolute; left:0; top:0; bottom:0; border-radius:3px; }
   .bar .mark { position:absolute; top:-2px; bottom:-2px; width:1.5px; background:var(--primary-text-color); }
+  .bar.tr { height:4px; margin:3px 0 2px; }
+  table.stats { width:100%; border-collapse:collapse; font-size:12px; margin:2px 0 10px; }
+  table.stats th { text-align:right; font-weight:500; color:var(--secondary-text-color); padding:2px 4px; }
+  table.stats th:first-child, table.stats td:first-child { text-align:left; padding-left:0; }
+  table.stats td { text-align:right; padding:3px 4px; border-top:1px solid var(--divider-color); }
+  .alarm { margin:12px; padding:14px 16px; border-radius:12px; color:#fff;
+           background:linear-gradient(135deg, #d70015, #ff3b30); border:3px solid #ff3b30;
+           box-shadow:0 0 0 0 rgba(255,59,48,.7); animation:sw-pulse 1.6s infinite; }
+  .alarm-head { display:flex; align-items:center; gap:8px; font-size:16px; font-weight:800; letter-spacing:.2px;
+                text-transform:uppercase; }
+  .alarm-head ha-icon { --mdc-icon-size:28px; }
+  .alarm-row { margin-top:10px; padding:10px 12px; border-radius:8px; background:rgba(0,0,0,.22); }
+  .alarm-tag { display:inline-block; font-size:11px; font-weight:800; text-transform:uppercase; background:#fff;
+               color:#d70015; padding:2px 8px; border-radius:10px; }
+  .alarm-text { margin-top:6px; font-size:15px; font-weight:700; line-height:1.35; }
+  .alarm-foot { margin-top:10px; font-size:12px; opacity:.9; }
+  @keyframes sw-pulse { 0% { box-shadow:0 0 0 0 rgba(255,59,48,.7); } 70% { box-shadow:0 0 0 14px rgba(255,59,48,0); }
+                        100% { box-shadow:0 0 0 0 rgba(255,59,48,0); } }
+  @media (prefers-reduced-motion: reduce) { .alarm { animation:none; } }
+  svg.hist { width:100%; height:110px; display:block; margin-top:4px; }
+  .hist-legend { display:flex; justify-content:space-between; font-size:11px; color:var(--secondary-text-color); margin-top:2px; }
+  .stat-top { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; margin:2px 0 8px; }
+  .stat-top .k { font-size:11px; color:var(--secondary-text-color); }
+  .stat-top .big { font-size:24px; font-weight:700; }
+  .stat-top .mid { font-size:15px; font-weight:600; }
+  .trv { font-size:11px; color:var(--sw-tr); }
+  .trv.warn { color:var(--sw-orange); }
   .pillar .val { font-size:12px; color:var(--secondary-text-color); }
   .note { font-size:12px; color:var(--secondary-text-color); margin-top:4px; }
   .note.warn { color: var(--sw-orange); font-weight:500; }
@@ -157,7 +185,7 @@ class SaeulenBase extends HTMLElement {
     return `<div class="section"><div class="label">Offene Position</div>${p.held.map((h) => {
       const res = h.value != null && h.cost ? h.value / h.cost - 1 : null;
       return `<div class="grid num">
-        <div class="kv"><div class="k">Instrument</div><div class="v">${esc(h.name)}</div></div>
+        <div class="kv"><div class="k">Instrument</div><div class="v">${esc(h.name)}${h.counts_as_name ? `<div class="s" style="font-size:11px;color:var(--secondary-text-color)">zählt als ${esc(h.counts_as_name)}</div>` : ""}</div></div>
         <div class="kv"><div class="k">Menge</div><div class="v">${(h.size ?? 0).toLocaleString("de-DE", { maximumFractionDigits: 4 })}</div></div>
         <div class="kv"><div class="k">Einstieg</div><div class="v">${eur(h.avg_buy)}</div></div>
         <div class="kv"><div class="k">Investiert</div><div class="v">${eur(h.cost, 0)}</div></div>
@@ -195,6 +223,111 @@ class SaeulenBase extends HTMLElement {
         ${seen.map((s) => `<span><i style="background:${MONTH_COLORS[s]}"></i>${MONTH_LABELS[s]}</span>`).join("")}</div>`;
   }
 
+  trBar(split, key, label) {
+    if (!split) return "";
+    const t = key === "cash" ? split.cash : (split.rows || []).find((x) => x.key === key);
+    if (!t) return "";
+    const diff = (t.ist - t.soll) * 100;
+    const warn = Math.abs(diff) >= 5;
+    // mehrere Produkte einer Säule: je ein Abschnitt, abgestuft eingefärbt
+    const parts = t.parts && t.parts.length > 1 ? t.parts : null;
+    let left = 0;
+    const fills = parts
+      ? parts.map((x, i) => {
+          const w = x.ist * 100;
+          const seg = `<div class="fill" title="${esc(x.name)} (${esc(x.isin)}): ${Math.round(x.ist * 100)} % · ${eur(x.value, 0)}"
+            style="left:${left}%;width:${w}%;background:${TR_SHADES[i % TR_SHADES.length]};border-radius:0"></div>`;
+          left += w;
+          return seg;
+        }).join("")
+      : `<div class="fill" style="width:${Math.min(100, t.ist * 100)}%;background:var(--sw-tr)"></div>`;
+    const legend = parts
+      ? `<div class="trv num">${parts.map((x, i) => `<span style="color:${TR_SHADES[i % TR_SHADES.length]}">■</span> ${esc(x.name)} ${Math.round(x.ist * 100)} %`).join(" · ")}</div>`
+      : "";
+    return `<div class="bar tr" style="overflow:hidden">${fills}
+        <div class="mark" style="left:${t.soll * 100}%"></div></div>
+      <div class="trv num${warn ? " warn" : ""}">${label ? esc(label) + " · " : ""}Trade Republic ${Math.round(t.ist * 100)} % · soll ${Math.round(t.soll * 100)} % · ${eur(t.value, 0)}</div>${legend}`;
+  }
+
+  trExtra(d) {
+    const split = d.tr_split;
+    const un = (d.depot && d.depot.unassigned) || [];
+    if (!split && !un.length) return "";
+    const cash = split ? `<div class="pillar"><div class="head"><span>Cash</span></div>${this.trBar(split, "cash")}</div>` : "";
+    const list = un.length ? `<div class="note warn">Nicht zugeordnet: ${un.map((u) =>
+      `${esc(u.name)} (${esc(u.isin)}, ${eur(u.value, 0)})${u.suggestion_name ? " – vermutlich " + esc(u.suggestion_name) : ""}`).join("; ")}.
+      In den Optionen unter „Weitere ISINs …“ eintragen, dann zählt die Position zur Säule.</div>` : "";
+    const legend = split ? `<div class="note"><span style="color:var(--sw-tr)">■</span> Verteilung bei Trade Republic (erkannte Positionen + Cash = ${eur(split.base, 0)}), Strich = Soll laut aktueller Entscheidung.</div>` : "";
+    return cash + legend + list;
+  }
+
+  alert(d, only) {
+    const todo = (d.todo || []).filter((t) => !only || t.key === only || t.key === "rebalance");
+    if (!todo.length) return "";
+    return `<div class="alarm" role="alert">
+      <div class="alarm-head"><ha-icon icon="mdi:alert-octagon"></ha-icon>
+        <span>${todo.length === 1 ? "Handlung nötig" : `${todo.length} Handlungen nötig`} – Depot weicht von der Strategie ab</span></div>
+      ${todo.map((t) => `<div class="alarm-row"><span class="alarm-tag">${esc(t.name)} · ${esc(t.action_label)}</span>
+        <div class="alarm-text">${esc(t.text)}</div></div>`).join("")}
+      <div class="alarm-foot">Bitte bei Trade Republic umsetzen – die Meldung verschwindet, sobald das Depot zum Ziel passt.</div>
+    </div>`;
+  }
+
+  stats(d) {
+    const st = d.stats;
+    if (!st) return "";
+    const color = (v) => v == null || Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
+    const signed = (v) => v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
+    const t = st.total;
+    const row = (r) => `<tr>
+        <td>${esc(r.name)}</td>
+        <td class="num">${eur(r.value, 0)}</td>
+        <td class="num">${r.cost != null ? eur(r.cost, 0) : (r.invested === false ? "Cash" : "–")}</td>
+        <td class="num" style="color:${color(r.pnl)}">${signed(r.pnl)}</td>
+        <td class="num" style="color:${color(r.pnl)}">${r.pnl_pct != null ? pct(r.pnl_pct) : ""}</td></tr>`;
+    return `<div class="section">
+      <div class="label">Säulenstatistik · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
+      <div class="stat-top num">
+        <div><div class="k">Gesamtwert</div><div class="big">${eur(t.value, 0)}</div></div>
+        <div><div class="k">Einstand</div><div class="mid">${t.cost != null ? eur(t.cost, 0) : "–"}</div></div>
+        <div><div class="k">Gewinn / Verlust</div><div class="mid" style="color:${color(t.pnl)}">${signed(t.pnl)}${t.pnl_pct != null ? ` · ${pct(t.pnl_pct)}` : ""}</div></div>
+      </div>
+      <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Gewinn / Verlust</th></tr>
+        ${st.rows.map(row).join("")}</table>
+      <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
+      ${this.history(d)}
+    </div>`;
+  }
+
+  history(d) {
+    const h = (d.value_history || []).filter((x) => x.value != null);
+    if (h.length < 2) {
+      return `<div class="label" style="margin-top:12px">Verlauf</div>
+        <div class="note">Der Verlauf wird ab heute einmal täglich aufgezeichnet${h.length ? " – erster Punkt " + new Date(h[0].date).toLocaleDateString("de-DE") : ""}.</div>`;
+    }
+    const W = 400, H = 110, P = 4;
+    const vals = h.map((x) => x.value);
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (hi - lo < 1) { lo -= 1; hi += 1; }
+    const x = (i) => P + (i / (h.length - 1)) * (W - 2 * P);
+    const y = (v) => P + (1 - (v - lo) / (hi - lo)) * (H - 2 * P);
+    const line = h.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join("");
+    const area = `${line}L${x(h.length - 1).toFixed(1)},${H - P}L${x(0).toFixed(1)},${H - P}Z`;
+    const first = h[0], last = h[h.length - 1];
+    const change = last.value - first.value;
+    const col = change >= 0 ? "var(--sw-green)" : "var(--sw-red)";
+    const dates = (p) => new Date(p.date).toLocaleDateString("de-DE");
+    return `<div class="label" style="margin-top:12px">Verlauf · ${dates(first)} – ${dates(last)}</div>
+      <svg class="hist" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+           aria-label="Verlauf des Gesamtwerts von ${eur(first.value, 0)} auf ${eur(last.value, 0)}">
+        <path d="${area}" fill="${col}" opacity=".12"/>
+        <path d="${line}" fill="none" stroke="${col}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+        ${h.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="5" fill="transparent"><title>${dates(p)}: ${eur(p.value, 0)}${p.pnl != null ? " · G/V " + eur(p.pnl, 0) : ""}</title></circle>`).join("")}
+      </svg>
+      <div class="hist-legend num"><span>Tief ${eur(Math.min(...vals), 0)} · Hoch ${eur(Math.max(...vals), 0)}</span>
+        <span style="color:${col}">${change >= 0 ? "+" : "−"}${eur(Math.abs(change), 0)} (${pct(change / first.value)})</span></div>`;
+  }
+
   pillars(d, active) {
     const ov = d.overview;
     const rows = ov.rows.map((r) => {
@@ -206,8 +339,9 @@ class SaeulenBase extends HTMLElement {
         <div class="bar"><div class="fill" style="width:${Math.min(100, r.ist * 100)}%;background:${esc(r.color)}"></div>
           <div class="mark" style="left:${r.soll * 100}%"></div></div>
         <div class="val num">${ov.due ? `${eur(r.value, 0)} → ${eur(r.target_value, 0)}` : eur(r.value, 0)}</div>
+        ${this.trBar(d.tr_split, r.key)}
       </div>`;
-    }).join("");
+    }).join("") + this.trExtra(d);
     const note = ov.due
       ? `<div class="note warn">Um ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp von den Soll-Anteilen abgewichen – die Beträge nach dem Pfeil stellen sie wieder her.</div>
          <div class="buttons" style="margin-top:8px"><button class="sw" data-action="rebalance">Angleichung übernehmen</button></div>`
@@ -262,9 +396,9 @@ class SaeulenwaechterCard extends SaeulenBase {
       body = `<div class="section note">Lade …</div>`;
     } else if (cfg.pillar && d.pillars[cfg.pillar]) {
       const p = d.pillars[cfg.pillar];
-      body = this.hero(p, d) + this.position(p) + this.signals(p) + this.pillars(d, p.key);
+      body = this.alert(d, p.key) + this.hero(p, d) + this.position(p) + this.signals(p) + this.pillars(d, p.key);
     } else {
-      body = `<div class="section"><div class="label">${esc(cfg.title || "Säulenwächter")} · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
+      body = this.alert(d) + this.stats(d) + `<div class="section"><div class="label">${esc(cfg.title || "Säulenwächter")} · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
         ${this.overviewRows(d, false)}</div>` + this.pillars(d, null);
     }
     this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card>${body}</ha-card>`;
@@ -298,6 +432,8 @@ class SaeulenwaechterPanel extends SaeulenBase {
         <div class="cols">
           <div>
             <ha-card>
+              ${this.alert(d)}
+              ${this.stats(d)}
               <div class="section">
                 <div class="label">Übersicht</div>
                 <div class="grid num">
