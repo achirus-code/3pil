@@ -1,7 +1,7 @@
 configuration:
   total:
     name: Gesamtbetrag (€)
-    description: Summe der drei Säulen (40/30/30), im Papiermodus das Startkapital. Eine Änderung setzt die Beträge neu.
+    description: Nur für das Papierdepot (Startkapital). Im echten Depot rechnet die App immer mit 40/30/30 vom tatsächlichen Depotwert.
   wa_phone:
     name: WhatsApp-Nummer
     description: Internationales Format ohne +, z. B. 4917…

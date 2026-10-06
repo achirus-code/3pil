@@ -84,7 +84,9 @@ const STYLE = `
   .interest .muted { opacity:.7; }
   .alarm-table { width:100%; margin-top:8px; border-collapse:collapse; font-size:14px; }
   .alarm-table th { text-align:left; font-size:11px; text-transform:uppercase; opacity:.85; padding:4px 6px; }
-  .alarm-table td { padding:6px; border-top:1px solid rgba(255,255,255,.25); white-space:nowrap; }
+  .alarm-row { overflow-x:auto; }
+  .alarm-table td { padding:6px 4px; border-top:1px solid rgba(255,255,255,.25); white-space:nowrap; }
+  .alarm-table .mv { white-space:normal; }
   .alarm-table .num { text-align:right; }
   .alarm-table .mv { font-weight:800; }
   .alarm-foot { margin-top:10px; font-size:12px; opacity:.9; }

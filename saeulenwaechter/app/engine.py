@@ -596,6 +596,13 @@ class Engine:
         empty = [k for k in pillars if not holdings.get(k)]
         empty_soll = sum(amounts[k] for k in empty) or 1
         depot_cash = depot.get("cash") or 0.0
+        # Echtes Depot: Säulenbeträge immer als Anteil am tatsächlichen Depot (40/30/30 vom Ist-Gesamtwert),
+        # der eingestellte Gesamtbetrag zählt nur für das Papierdepot.
+        base = dict(amounts)
+        if mode == "depot":
+            depot_total = depot_cash + sum(h.get("value") or 0 for hs in holdings.values() for h in hs)
+            weight_sum = sum(amounts.values()) or 1
+            base = {k: depot_total * amounts[k] / weight_sum for k in amounts}
         for key, p in pillars.items():
             cfg, res, st = p["cfg"], p["res"], p["st"]
             held = holdings.get(key, [])
@@ -610,7 +617,8 @@ class Engine:
             tradable = [h for h in held if not h.get("physical")]
             physical_value = sum(h.get("value") or 0 for h in held if h.get("physical"))
             # Kaufbetrag: was das physische Gold nicht schon abdeckt
-            buy_budget = max((st.get("proceeds") or amounts[key]) - physical_value, 0.0)
+            buy_budget = max((base[key] if mode == "depot" else (st.get("proceeds") or amounts[key]))
+                             - physical_value, 0.0)
             action = S.plan_action([h.get("counts_as") or h["isin"] for h in tradable], target) \
                 if st.get("month") else None
             if action == "buy" and buy_budget < 2 * ORDER_FEE:
@@ -653,7 +661,7 @@ class Engine:
                 "physical_value": physical_value or None,
                 "buy_budget": buy_budget,
                 "value": value,
-                "amount": amounts[key],
+                "amount": round(base[key], 2),
                 "proceeds": st.get("proceeds"),
                 "action": action,
                 "action_label": ACTION_LABELS.get(action, "–") if action else "–",

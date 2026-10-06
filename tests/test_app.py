@@ -360,7 +360,8 @@ async def test_physical_gold_in_depot_instructions(make_engine, market, monkeypa
     await eng.add_physical_gold("Barren", 100, "g", 999.9, 9000.0)
     gold = eng.data["pillars"]["gold"]
     assert gold["action"] == "buy"
-    assert gold["buy_budget"] == pytest.approx(30000 - 100 * 0.9999 * price)
+    total = sum(x["value"] for x in eng.data["pillars"].values())  # echtes Depot inkl. physischem Gold
+    assert gold["buy_budget"] == pytest.approx(total * 0.3 - 100 * 0.9999 * price, abs=0.01)
     assert "schon abgezogen" in gold["instruction"]
     # deckt das Gold die Säule ab, ist nichts zu kaufen
     await eng.add_physical_gold("Großbarren", 1000, "g", 999.9, 90000.0)
@@ -380,6 +381,10 @@ async def test_depot_empty_pillars_use_tr_cash(make_engine, monkeypatch):
     assert p["gold"]["value"] == pytest.approx(3000.0)
     assert p["anleihen"]["value"] == pytest.approx(3000.0)
     assert eng.data["stats"]["total"]["value"] == pytest.approx(p["welt"]["value"] + 6000.0)
+    # Beträge und Kaufbudget folgen dem echten Depotwert, nicht dem eingestellten Gesamtbetrag (100.000 €)
+    total = p["welt"]["value"] + 6000.0
+    assert p["gold"]["amount"] == pytest.approx(total * 0.3, abs=0.01)
+    assert p["gold"]["buy_budget"] == pytest.approx(total * 0.3, abs=0.01)
 
 
 async def test_web_gold_api(make_engine, aiohttp_client):
