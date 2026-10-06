@@ -19,6 +19,7 @@ from . import strategy as S
 from .const import (
     CANDLE_REFRESH_H,
     CONF_BLS_KEY,
+    CONF_CASH_RATE,
     CONF_EXTRA_ISINS,
     CONF_MONTHLY_REPORT,
     CONF_NOTIFY,
@@ -434,6 +435,14 @@ class Engine:
         try:
             p = await self.tr.portfolio()
             depot.update(p, connected=True)
+            try:  # Zinssatz auf das Guthaben – bei jedem Abgleich neu
+                rate = await self.tr.interest()
+                if rate is not None:
+                    self.state["interest"] = {"rate": rate, "at": self.now().isoformat()}
+            except TRAuthError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.info("TR-Zinssatz nicht geladen: %s", err)
             # Kurse für Positionen außerhalb der Säulen-Instrumente
             extra = [i for i in p["positions"] if i not in _all_isins()]
             if extra:
@@ -471,6 +480,35 @@ class Engine:
 
     def _price(self, isin: str) -> dict:
         return self.state["market"].get(isin, {}).get("price") or {}
+
+    def cash_rate(self) -> dict:
+        """Zinssatz auf Cash: eigener Wert aus den Optionen, sonst der zuletzt von Trade Republic gelesene."""
+        own = self.options.get(CONF_CASH_RATE)
+        if own not in (None, ""):
+            try:
+                return {"rate": float(str(own).replace(",", ".")) / 100, "source": "option", "at": None}
+            except ValueError:
+                pass
+        tr = self.state.get("interest") or {}
+        if tr.get("rate") is not None:
+            return {"rate": tr["rate"], "source": "trade_republic", "at": tr.get("at")}
+        return {"rate": None, "source": None, "at": None}
+
+    def _accrue_interest(self, pillars: dict, amounts: dict, today: date, rate: float | None) -> None:
+        """Papierdepot: Säulen in Cash bekommen täglich die Zinsen gutgeschrieben (wie bei Trade Republic)."""
+        for key, p in pillars.items():
+            st = p["st"]
+            if (st.get("paper") or {}).get("isin"):
+                st["interest_at"] = None  # investiert: keine Zinsen
+                continue
+            last = date.fromisoformat(st["interest_at"]) if st.get("interest_at") else None
+            st["interest_at"] = today.isoformat()
+            if not rate or not last or today <= last:
+                continue
+            base = st.get("proceeds") or amounts[key]
+            gain = base * ((1 + rate) ** ((today - last).days / 365) - 1)
+            st["proceeds"] = base + gain
+            st["interest_earned"] = (st.get("interest_earned") or 0) + gain
 
     def _compute(self, now: datetime, depot: dict) -> dict:
         today = now.date()
@@ -533,6 +571,9 @@ class Engine:
         phys = self._physical_holdings()
         phys_value = sum(h["value"] or 0 for h in phys)
         gold_key = next((k for k, p in pillars.items() if p["cfg"]["isin"] == GOLD_ISIN), None)
+        rate = self.cash_rate()
+        if mode == "paper":
+            self._accrue_interest(pillars, amounts, today, rate["rate"])
         if mode == "paper" and is_open:
             for key, p in pillars.items():
                 amount = amounts[key] - phys_value if key == gold_key else amounts[key]
@@ -550,11 +591,18 @@ class Engine:
         # 4) Werte, Aktion, Status
         values: dict[str, float] = {}
         out_pillars: dict[str, dict] = {}
+        # Echtes Depot: Säulen ohne Position halten ihren Anteil am Cash bei Trade Republic –
+        # nicht den konfigurierten Betrag, der im Depot gar nicht existiert.
+        empty = [k for k in pillars if not holdings.get(k)]
+        empty_soll = sum(amounts[k] for k in empty) or 1
+        depot_cash = depot.get("cash") or 0.0
         for key, p in pillars.items():
             cfg, res, st = p["cfg"], p["res"], p["st"]
             held = holdings.get(key, [])
             if held and all(h.get("value") is not None for h in held):
                 value = sum(h["value"] for h in held)
+            elif mode == "depot":
+                value = depot_cash * amounts[key] / empty_soll if not held else 0.0
             else:
                 value = st.get("proceeds") or amounts[key]
             values[key] = value
@@ -641,12 +689,26 @@ class Engine:
         todo = [{"key": k, "name": p["name"], "action": p["action"], "action_label": p["action_label"],
                  "text": p["instruction"]} for k, p in out_pillars.items() if p.get("instruction")]
         if overview["due"] and not todo:
-            todo.append({"key": "rebalance", "name": "Angleichen", "action": "rebalance", "action_label": "angleichen",
+            todo.append({"key": "rebalance", "name": "Depot", "action": "rebalance", "action_label": "angleichen",
                          "text": "ANGLEICHEN: " + " · ".join(
                              f"{out_pillars[r['key']]['name']} {S.fmt_eur(r['value'], 0)} → {S.fmt_eur(r['target_value'], 0)}"
-                             for r in overview["rows"] if abs(r["diff_pp"]) >= 0.5)})
+                             for r in overview["rows"] if abs(r["diff_pp"]) >= 0.5),
+                         "rows": [{"key": r["key"], "name": out_pillars[r["key"]]["name"],
+                                   "value": round(r["value"], 2), "target_value": round(r["target_value"], 2),
+                                   "delta": round(r["target_value"] - r["value"], 2),
+                                   "ist": r["ist"], "soll": r["soll"],
+                                   "cash": out_pillars[r["key"]]["state"] == STATE_CASH}
+                                  for r in overview["rows"]]})
         stats = S.pillar_stats([{"key": k, "name": p["name"], "value": p["value"], "held": p["held"]}
                                 for k, p in out_pillars.items()])
+        # Zinsen auf Cash: im Depot das Guthaben bei TR, im Papierdepot die Säulen ohne Position
+        cash_base = (depot.get("cash") or 0.0) if mode == "depot" else \
+            sum(values[k] for k in pillars if not holdings.get(k))
+        stats["interest"] = {
+            **rate, "cash": round(cash_base, 2),
+            "per_year": round(cash_base * rate["rate"], 2) if rate["rate"] is not None else None,
+            "earned": round(sum(p["st"].get("interest_earned") or 0 for p in pillars.values()), 2)
+            if mode == "paper" else None}
         return {
             "updated": now.isoformat(),
             "mode": mode,

@@ -31,3 +31,6 @@ configuration:
   bls_key:
     name: BLS API key (optional)
     description: For more requests of the US unemployment rate.
+  cash_zins:
+    name: Interest rate on cash in % (optional)
+    description: Leave empty to use the rate Trade Republic reports on each sync. Your own value (e.g. 2.0) takes precedence.
