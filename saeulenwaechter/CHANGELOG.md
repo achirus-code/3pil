@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.10.2
+
+- Stückzahl aus den Transaktionsdetails im aktuellen Format „Transaktion: 2.805,927158 × 11,51 €“ – vorher wurde sie fast nie gefunden und nur geschätzt.
+
 ## 2.10.1
 
 - Diagnose der Zeitleiste im Popup „Wertentwicklung“ (aufklappbar, ohne Beträge): Seiten, Einträge, Einträge mit ISIN, eigene Positionen, Stückzahlen, Fehler.
