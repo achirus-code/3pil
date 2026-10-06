@@ -209,6 +209,15 @@ async def test_depot_actions_recognition_and_expired_login(make_engine, sent, ma
     assert {h["isin"] for h in d["pillars"]["welt"]["held"]} == {"IE000VAHT5T0", "US0378331005"}
 
     # Login abgelaufen: genau eine Meldung, keine Handlungsanweisung
+    # seit wann gehalten: ab dem ersten Abgleich, von Hand korrigierbar
+    held = {h["isin"]: h for h in eng2.data["pillars"]["welt"]["held"]}
+    assert held["IE000VAHT5T0"]["since"] == "2026-10-06" and not held["IE000VAHT5T0"]["since_manual"]
+    await eng2.set_held_since("IE000VAHT5T0", "2024-03-15")
+    held = {h["isin"]: h for h in eng2.data["pillars"]["welt"]["held"]}
+    assert held["IE000VAHT5T0"]["since"] == "2024-03-15" and held["IE000VAHT5T0"]["since_manual"]
+    with pytest.raises(ValueError):
+        await eng2.set_held_since("IE000VAHT5T0", "2030-01-01")
+
     # ohne Session: es gilt der gespeicherte Stand, mit aktuellen Kursen
     d = await eng2.refresh()
     assert d["mode"] == "depot" and d["depot"]["synced_at"] and d["depot"]["error"] is None

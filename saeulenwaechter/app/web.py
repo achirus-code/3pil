@@ -96,8 +96,14 @@ async def _json(request: web.Request) -> dict:
 
 async def action(request: web.Request) -> web.Response:
     engine = request.app[ENGINE]
-    act = (await _json(request)).get("action")
-    if act == "refresh":
+    body = await _json(request)
+    act = body.get("action")
+    if act == "since":
+        try:
+            await engine.set_held_since(str(body.get("isin") or ""), body.get("date") or None)
+        except ValueError as err:
+            raise web.HTTPBadRequest(text=str(err))
+    elif act == "refresh":
         await engine.refresh()
     elif act == "rebalance":
         await engine.apply_rebalance()

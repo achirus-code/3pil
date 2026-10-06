@@ -480,6 +480,15 @@ class Engine:
     async def _sync_depot(self) -> None:
         """Einmal lesen: Positionen, Cash und Zinssatz; der Stand wird gespeichert."""
         p = await self.tr.portfolio()
+        # Seit wann eine Position gehalten wird: Trade Republic liefert kein Kaufdatum – gezählt wird ab dem ersten
+        # Abgleich, an dem sie im Depot war (in der Oberfläche korrigierbar). Verkaufte Positionen fallen heraus.
+        since = self.state.setdefault("held_since", {})
+        today = self.now().date().isoformat()
+        for isin in list(since):
+            if isin not in p["positions"]:
+                del since[isin]
+        for isin in p["positions"]:
+            since.setdefault(isin, {"date": today, "manual": False})
         self.state["depot_snapshot"] = {"positions": p["positions"], "cash": p.get("cash"),
                                         "synced_at": self.now().isoformat()}
         self.state["sent"].pop("auth", None)
@@ -887,6 +896,8 @@ class Engine:
                     "cost": size * pos["avg_buy"] if pos.get("avg_buy") else None,
                     "bid": bid,
                     "value": size * bid if bid else None,
+                    "since": (self.state.get("held_since", {}).get(isin) or {}).get("date"),
+                    "since_manual": (self.state.get("held_since", {}).get(isin) or {}).get("manual", False),
                     "change_24h": (quote["last"] / quote["pre"] - 1
                                    if (quote := self._price(isin)).get("last") and quote.get("pre") else None),
                 })
@@ -1162,6 +1173,21 @@ class Engine:
         return any(results)
 
     # ------------------------------------------------------------ Aktionen
+
+    async def set_held_since(self, isin: str, day: str | None) -> None:
+        """Kaufdatum einer Depotposition von Hand setzen (Trade Republic liefert keins)."""
+        since = self.state.setdefault("held_since", {})
+        if isin not in ((self.snapshot or {}).get("positions") or {}):
+            raise ValueError("Position nicht im Depot")
+        if day:
+            parsed = date.fromisoformat(day)
+            if parsed > self.now().date():
+                raise ValueError("Datum liegt in der Zukunft")
+            since[isin] = {"date": parsed.isoformat(), "manual": True}
+        else:
+            since.pop(isin, None)
+        await self.async_save()
+        await self.refresh()
 
     async def apply_rebalance(self) -> None:
         """Papierdepot: teilt das Papierkapital neu auf (Soll % · Σ Werte).

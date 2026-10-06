@@ -5,6 +5,8 @@
 - Benachrichtigungen auch über einen Dienst in Home Assistant (Optionen „Benachrichtigungsdienst“ und „Empfänger“), z. B. whatsapp.send_message von „WhatsApp for Home Assistant“, die Home-Assistant-App oder Telegram – zusätzlich zu oder statt CallMeBot.
 - Statistik zeigt den Gewinn von heute: gesamt (in € und %) und je Säule, aus der Tagesänderung der Positionen; physisches Gold mit der Änderung des Goldpreises.
 
+- Haltedauer: Spalte „Gehalten“ in der Statistik (älteste Position der Säule, z. B. „3 Wochen“, „1 Jahr 3 M.“) und „Gehalten seit“ je Position. Trade Republic liefert kein Kaufdatum – gezählt wird ab dem ersten Abgleich, das Datum lässt sich je Position über „ändern“ korrigieren. Physisches Gold nutzt das eingetragene Kaufdatum.
+
 ## 2.5.2
 
 - QR-Code wird quadratisch und vollständig angezeigt (SVG mit viewBox, feste Größe, breiterer Rand) – vorher konnte er beschnitten oder verzerrt sein und ließ sich nicht scannen.
