@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.9.0
+
+- Statistik: Zeiträume 1 Woche, 1/3/6 Monate, seit 1.1., 1/3/5 Jahre und Max., jeweils mit Gewinn je Säule.
+- Interaktive Grafik: Maus oder Finger zeigt für jeden Tag Gesamtwert, Veränderung seit Beginn des Zeitraums und die Werte je Säule; Achsen mit Werten und Datum.
+
 ## 2.8.0
 
 - CallMeBot entfernt. Meldungen gehen nur noch über einen Dienst in Home Assistant, Standard: whatsapp.send_message von „WhatsApp for Home Assistant“ (FaserF).

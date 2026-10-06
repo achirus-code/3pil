@@ -4,6 +4,7 @@ und meldet neue Erkenntnisse per WhatsApp. Läuft ohne Home Assistant; der Zusta
 from __future__ import annotations
 
 import asyncio
+import calendar
 import copy
 import json
 import logging
@@ -800,7 +801,7 @@ class Engine:
             },
             "tr_split": split,
             "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
-            "performance": self._performance(holdings, sum(values[k] for k in pillars if not holdings.get(k)), today),
+            "performance": self._performance(holdings, {k: values[k] for k in pillars if not holdings.get(k)}, today),
             "market_error": market.get("_error"),
             "macro_status": {k: {"ok_at": v.get("ok_at"), "error": v.get("error")}
                              for k, v in self.state["macro"].items()},
@@ -915,13 +916,26 @@ class Engine:
                 })
         return out, unassigned
 
-    PERF_PERIODS = (("1M", 1), ("6M", 6), ("1J", 12))
+    PERF_PERIODS = ("1W", "1M", "3M", "6M", "YTD", "1J", "3J", "5J", "MAX")
 
-    def _performance(self, holdings: dict, cash: float, today: date) -> dict | None:
-        """Entwicklung der heutigen Positionen über 1 Monat, 6 Monate und 1 Jahr (aus Tagesschlusskursen).
+    @staticmethod
+    def _period_start(label: str, today: date) -> date | None:
+        if label == "1W":
+            return today - timedelta(days=7)
+        if label == "YTD":
+            return date(today.year, 1, 1)
+        if label == "MAX":
+            return None
+        months = {"1M": 1, "3M": 3, "6M": 6, "1J": 12, "3J": 36, "5J": 60}[label]
+        y, m = divmod(today.year * 12 + today.month - 1 - months, 12)
+        return date(y, m + 1, min(today.day, calendar.monthrange(y, m + 1)[1]))
 
-        Gerechnet mit den heutigen Stückzahlen – also: was die jetzigen Bestände in dem Zeitraum gewonnen oder
-        verloren haben. Cash zählt mit seinem heutigen Betrag (ohne Zinsen). Physisches Gold folgt Xetra-Gold.
+    def _performance(self, holdings: dict, cash_by_pillar: dict[str, float], today: date) -> dict | None:
+        """Entwicklung der heutigen Bestände über 1 Woche bis 5 Jahre (aus Tagesschlusskursen).
+
+        Gerechnet mit den heutigen Stückzahlen – also: was die jetzigen Bestände im Zeitraum gewonnen oder verloren
+        haben. Cash zählt mit seinem heutigen Betrag (ohne Zinsen). Physisches Gold folgt Xetra-Gold; junge Produkte
+        werden vor ihrem ersten Kurs mit dem gleichwertigen Säulen-Instrument fortgeschrieben.
         """
         def closes(isin: str) -> list[tuple[str, float]]:
             out = []
@@ -933,67 +947,60 @@ class Engine:
                     continue
             return sorted(out)
 
-        lines = []  # (Säule, Stückzahl, Kursreihe, heutiger Wert)
+        lines = []  # (Säule, Stückzahl, Kursreihe)
         for key, hs in holdings.items():
             for h in hs:
                 series = closes(GOLD_ISIN if h.get("physical") else h["isin"])
                 ref = h.get("counts_as")
                 if series and ref and ref != h["isin"]:
-                    # Junges Produkt (z. B. erst seit Kurzem gelistet): davor mit dem gleichwertigen Säulen-Instrument
-                    # fortschreiben, angeschlossen am ersten eigenen Kurs
                     ref_series = closes(ref)
                     first_day, first_close = series[0]
                     anchor = [c for d, c in ref_series if d <= first_day]
                     if anchor and anchor[-1]:
                         factor = first_close / anchor[-1]
                         series = [(d, c * factor) for d, c in ref_series if d < first_day] + series
-                if not series or not h.get("size") or h.get("value") is None:
-                    continue
-                lines.append((key, h["size"], series, h["value"]))
+                if series and h.get("size") and h.get("value") is not None:
+                    lines.append((key, h["size"], series))
         if not lines:
             return None
-        start = (today - timedelta(days=366)).isoformat()
-        days = sorted({d for _, _, series, _ in lines for d, _ in series if d >= start})
+        # gemeinsamer Zeitraum: ab dem Tag, an dem jede Position einen Kurs hat
+        start = max(series[0][0] for *_, series in lines)
+        days = sorted({d for *_, series in lines for d, _ in series if d >= start})
         if not days:
             return None
+        keys = list(holdings)
+        rows = []  # [Tag, gesamt, je Säule …]
+        last = [None] * len(lines)
+        idx = [0] * len(lines)
+        for day in days:
+            per = dict.fromkeys(keys, 0.0)
+            for i, (key, size, series) in enumerate(lines):
+                while idx[i] < len(series) and series[idx[i]][0] <= day:
+                    last[i] = series[idx[i]][1]
+                    idx[i] += 1
+                per[key] += size * last[i]
+            vals = [round(per[k] + cash_by_pillar.get(k, 0.0), 2) for k in keys]
+            rows.append([day, round(sum(vals), 2), *vals])
+        today_s = today.isoformat()
+        if rows[-1][0] != today_s:
+            rows.append([today_s, *rows[-1][1:]])
 
-        def value_at(day: str, key: str | None = None) -> float | None:
-            total = 0.0
-            for k, size, series, _ in lines:
-                if key and k != key:
-                    continue
-                past = [c for d, c in series if d <= day]
-                if not past:
-                    return None
-                total += size * past[-1]
-            return total
+        def row_at(day: str) -> list | None:
+            before = [r for r in rows if r[0] <= day]
+            return before[-1] if before else None
 
-        now_total = sum(v for *_, v in lines) + cash
+        now = rows[-1]
         periods = {}
-        for label, months in self.PERF_PERIODS:
-            day = S.add_months(S.month_key(today), -months) + today.isoformat()[7:]
-            try:
-                day = date.fromisoformat(day).isoformat()
-            except ValueError:  # 31. eines kürzeren Monats
-                day = (date.fromisoformat(day[:8] + "28")).isoformat()
-            then = value_at(day)
-            if then is None:
+        for label in self.PERF_PERIODS:
+            begin = self._period_start(label, today)
+            ref = rows[0] if begin is None else row_at(begin.isoformat())
+            if ref is None or (begin is not None and begin.isoformat() < rows[0][0]):
                 periods[label] = None
                 continue
-            pos_now = sum(v for *_, v in lines)
-            gain = pos_now - then
-            by_pillar = {}
-            for key in holdings:
-                t = value_at(day, key)
-                n = sum(v for k, *_, v in lines if k == key)
-                if t is not None and n:
-                    by_pillar[key] = round(n - t, 2)
-            periods[label] = {"from": day, "gain": round(gain, 2), "pct": gain / (then + cash) if then + cash else None,
-                              "pillars": by_pillar}
-        series = [[d, round(v + cash, 2)] for d in days if (v := value_at(d)) is not None]
-        if series and series[-1][0] != today.isoformat():
-            series.append([today.isoformat(), round(now_total, 2)])
-        return {"periods": periods, "series": series, "cash": round(cash, 2)}
+            gain = now[1] - ref[1]
+            periods[label] = {"from": ref[0], "gain": round(gain, 2), "pct": gain / ref[1] if ref[1] else None,
+                              "pillars": {k: round(now[2 + i] - ref[2 + i], 2) for i, k in enumerate(keys)}}
+        return {"periods": periods, "keys": keys, "series": rows, "cash": round(sum(cash_by_pillar.values()), 2)}
 
     @staticmethod
     def _reconcile(depot: dict, holdings: dict, unassigned: list[dict]) -> dict | None:
