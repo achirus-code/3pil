@@ -71,6 +71,11 @@ async def make_engine(tmp_path, market, sent, monkeypatch):
         self.cookies = {}
 
     monkeypatch.setattr(TradeRepublic, "logout", tr_logout)
+
+    async def no_trades(self, isins=None, max_pages=60):
+        return []
+
+    monkeypatch.setattr(TradeRepublic, "transactions", no_trades)  # kein Netz in den Tests
     sessions = []
 
     async def factory(options=None, when="2026-10-06 10:00"):
@@ -536,15 +541,17 @@ async def test_performance_periods_and_series(make_engine, market):
     eng = await make_engine()
     d = await eng.refresh()
     perf = d["performance"]
-    assert set(perf["periods"]) == {"1M", "6M", "1J"}
+    assert list(perf["periods"]) == ["1W", "1M", "3M", "6M", "YTD", "1J", "3J", "5J", "MAX"]
     one = perf["periods"]["1M"]
-    assert one["from"] == "2026-09-06" and isinstance(one["gain"], float)
-    # Gewinn = heutiger Wert der Positionen − Wert mit den Kursen vor einem Monat
-    welt = d["pillars"]["welt"]["held"][0]
-    assert set(one["pillars"]) <= {"welt", "gold", "anleihen"} and "welt" in one["pillars"]
-    assert perf["series"][-1] == ["2026-10-06", pytest.approx(d["stats"]["total"]["value"], abs=1)]
-    assert perf["series"][0][0] >= "2025-10-05" and welt["value"] > 0
-
+    assert one["from"] <= "2026-09-06" and isinstance(one["gain"], float)
+    assert perf["periods"]["YTD"]["from"] <= "2026-01-02"
+    # jede Zeile: Tag, gesamt, je Säule – die Summe der Säulen ergibt den Gesamtwert
+    assert perf["keys"] == ["welt", "gold", "anleihen"]
+    last = perf["series"][-1]
+    assert last[0] == "2026-10-06" and last[1] == pytest.approx(sum(last[2:]), abs=0.05)
+    invested_positions = sum(h["value"] for p in d["pillars"].values() for h in p["held"])
+    assert last[1] == pytest.approx(invested_positions, abs=1)  # Wertpapiere ohne Cash
+    assert one["gain"] == pytest.approx(sum(one["pillars"].values()), abs=0.05)
 
 def test_normalize_target():
     from sw.notify import normalize_target
@@ -553,3 +560,37 @@ def test_normalize_target():
     assert normalize_target("491711234567") == "+491711234567"
     assert normalize_target("120363000000000000@g.us") == "120363000000000000@g.us"
     assert normalize_target("") is None
+
+
+
+async def test_performance_uses_trade_history(make_engine, market, monkeypatch):
+    """Echter Verlauf: Stückzahlen je Tag aus den Käufen, Käufe zählen nicht als Gewinn, Haltedauer aus dem 1. Kauf."""
+    async def portfolio(self):
+        return {"positions": {"IE00B3YLTY66": {"size": 100.0, "avg_buy": 10.0}}, "cash": 0.0}
+
+    async def transactions(self, isins=None, max_pages=60):
+        return [{"id": "a", "isin": "IE00B3YLTY66", "time": "2026-03-02T10:00:00+00:00", "date": "2026-03-02",
+                 "amount": -600.0, "shares": 60.0, "title": "SPDR", "subtitle": "Kauforder"},
+                {"id": "b", "isin": "IE00B3YLTY66", "time": "2026-09-21T10:00:00+00:00", "date": "2026-09-21",
+                 "amount": -450.0, "shares": 40.0, "title": "SPDR", "subtitle": "Sparplan ausgeführt"}]
+
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    monkeypatch.setattr(TradeRepublic, "transactions", transactions)
+    eng = await make_engine()
+    eng.tr.cookies = {"tr_session": "s"}
+    d = await eng.refresh()
+    perf = d["performance"]
+    assert perf["history"] is True
+    rows = {r[0]: r for r in perf["series"]}
+    before = max(day for day in rows if day < "2026-03-02")
+    assert rows[before][1] == 0  # vor dem ersten Kauf nichts im Depot
+    mid = max(day for day in rows if day < "2026-09-21")
+    closes = {r[0]: r for r in perf["series"]}
+    assert closes[mid][1] > 0
+    one = perf["periods"]["1M"]
+    assert one["invested"] == pytest.approx(450.0)
+    assert one["gain"] == pytest.approx(perf["series"][-1][1] - rows[[k for k in rows if k <= one["from"]][-1]][1] - 450.0,
+                                        abs=0.05)
+    assert [e["amount"] for e in perf["events"]] == [600.0, 450.0]
+    held = d["pillars"]["welt"]["held"][0]
+    assert held["since"] == "2026-03-02" and held["since_manual"] == "trades"

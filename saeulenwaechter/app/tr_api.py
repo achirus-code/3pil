@@ -293,6 +293,58 @@ class TradeRepublic:
         if status >= 400:
             raise TRError(f"Session-Verlängerung fehlgeschlagen (HTTP {status}).")
 
+    async def transactions(self, isins: set[str] | None = None, max_pages: int = 60) -> list[dict]:
+        """Käufe und Verkäufe aus der Zeitleiste („Aktivität“): je Eintrag ISIN, Zeitpunkt, Betrag und Stückzahl.
+
+        Betrag wie bei Trade Republic: negativ = Geld ging raus (Kauf), positiv = Geld kam rein (Verkauf).
+        Stückzahl positiv bei Zugang, negativ bei Abgang (aus den Details der Transaktion, falls geliefert).
+        """
+        items: list[dict] = []
+        after = None
+        for _ in range(max_pages):
+            payload = {"type": "timelineTransactions"}
+            if after:
+                payload["after"] = after
+            (page,) = await self.fetch([payload], auth=True)
+            if isinstance(page, TRAuthError):
+                raise page
+            if isinstance(page, Exception) or not isinstance(page, dict):
+                break
+            items.extend(page.get("items") or [])
+            after = (page.get("cursors") or {}).get("after")
+            if not after:
+                break
+        trades = []
+        for it in items:
+            isin = _isin_from_icon(it.get("icon"))
+            if not isin or (isins is not None and isin not in isins):
+                continue
+            if str(it.get("status") or "").upper() in ("CANCELED", "CANCELLED", "FAILED", "PENDING"):
+                continue
+            try:
+                when = datetime.fromisoformat(str(it["timestamp"]).replace("Z", "+00:00"))
+            except (KeyError, ValueError):
+                continue
+            trades.append({"id": it.get("id"), "isin": isin, "time": when.isoformat(),
+                           "date": when.date().isoformat(),
+                           "amount": _f(_amount(it.get("amount"))), "title": it.get("title"),
+                           "subtitle": it.get("subtitle"), "shares": None})
+        # Stückzahlen aus den Details, in Paketen
+        for i in range(0, len(trades), 20):
+            chunk = trades[i:i + 20]
+            res = await self.fetch([{"type": "timelineDetailV2", "id": t["id"]} for t in chunk if t["id"]], auth=True)
+            for t, detail in zip([t for t in chunk if t["id"]], res):
+                if isinstance(detail, TRAuthError):
+                    raise detail
+                if isinstance(detail, Exception):
+                    continue
+                shares = find_shares(detail)
+                if shares is not None:
+                    sell = (t["amount"] or 0) > 0 or "verkauf" in str(t["subtitle"] or "").lower() \
+                        or "sell" in str(t["subtitle"] or "").lower()
+                    t["shares"] = -abs(shares) if sell else abs(shares)
+        return trades
+
     async def logout(self) -> None:
         """Beendet die Session bei Trade Republic und vergisst die Cookies (Fehler sind egal)."""
         if self.cookies:
@@ -475,6 +527,55 @@ class TradeRepublic:
                 if c.get("currencyId") == "EUR":
                     cash_eur = _f(c.get("amount"))
         return {"positions": positions, "cash": cash_eur}
+
+
+ICON_ISIN = re.compile(r"([A-Z]{2}[A-Z0-9]{9}[0-9])")
+SHARE_TITLES = ("aktien", "anteile", "stück", "stueck", "shares", "anzahl", "menge")
+
+
+def _isin_from_icon(icon: Any) -> str | None:
+    """Die ISIN steckt im Logo-Pfad, z. B. „logos/IE00B3YLTY66/v2“."""
+    m = ICON_ISIN.search(str(icon or ""))
+    return m.group(1) if m else None
+
+
+def _de_number(text: Any) -> float | None:
+    """„1.234,5678“ oder „0,5“ → Zahl."""
+    m = re.search(r"-?[\d.]+(?:,\d+)?|-?\d+(?:\.\d+)?", str(text or ""))
+    if not m:
+        return None
+    t = m.group(0)
+    if "," in t:
+        t = t.replace(".", "").replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def find_shares(body: Any, depth: int = 0) -> float | None:
+    """Stückzahl aus den Details einer Transaktion: ein Eintrag mit Titel „Aktien“/„Anteile“/„Stück“."""
+    if depth > 8:
+        return None
+    if isinstance(body, dict):
+        title = str(body.get("title") or "").strip().lower()
+        if title in SHARE_TITLES:
+            det = body.get("detail")
+            value = det.get("text") if isinstance(det, dict) else det
+            n = _de_number(value)
+            if n:
+                return n
+        for v in body.values():
+            if isinstance(v, (dict, list)):
+                r = find_shares(v, depth + 1)
+                if r is not None:
+                    return r
+    elif isinstance(body, list):
+        for v in body:
+            r = find_shares(v, depth + 1)
+            if r is not None:
+                return r
+    return None
 
 
 def _amount(v: Any) -> Any:

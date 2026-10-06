@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.9.0
+
+- Statistik: Zeiträume 1 Woche, 1/3/6 Monate, seit 1.1., 1/3/5 Jahre und Max., jeweils mit Gewinn je Säule.
+- Echte Historie: Beim Synchronisieren liest die App die Käufe und Verkäufe aus der Trade-Republic-Zeitleiste. Der Verlauf rechnet je Tag mit den damals gehaltenen Stückzahlen; der Gewinn eines Zeitraums zählt neu investiertes Geld nicht mit. „Gehalten seit“ kommt aus dem ersten Kauf der laufenden Position. Käufe/Verkäufe als ▲/▼ in der Grafik und im Tooltip. Cash ist im Verlauf nicht enthalten.
+- Interaktive Grafik: Maus oder Finger zeigt für jeden Tag Gesamtwert, Veränderung seit Beginn des Zeitraums und die Werte je Säule; Achsen mit Werten und Datum.
+
 ## 2.8.0
 
 - CallMeBot entfernt. Meldungen gehen nur noch über einen Dienst in Home Assistant, Standard: whatsapp.send_message von „WhatsApp for Home Assistant“ (FaserF).

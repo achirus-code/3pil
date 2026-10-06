@@ -4,6 +4,7 @@ und meldet neue Erkenntnisse per WhatsApp. Läuft ohne Home Assistant; der Zusta
 from __future__ import annotations
 
 import asyncio
+import calendar
 import copy
 import json
 import logging
@@ -503,6 +504,19 @@ class Engine:
         self.state["depot_snapshot"] = {"positions": p["positions"], "cash": p.get("cash"),
                                         "synced_at": self.now().isoformat()}
         self.state["sent"].pop("auth", None)
+        try:  # Käufe und Verkäufe der gehaltenen Positionen (für Haltedauer und echten Verlauf)
+            trades = await self.tr.transactions(isins=set(p["positions"]))
+            old = {t["id"]: t for t in self.state.get("trades", []) if t.get("id")}
+            for t in trades:
+                if t.get("id"):
+                    old[t["id"]] = {**old.get(t["id"], {}), **{k: v for k, v in t.items() if v is not None}}
+            self.state["trades"] = sorted((t for t in old.values() if t["isin"] in p["positions"]),
+                                          key=lambda t: t["time"])
+            self.state["trades_at"] = self.now().isoformat()
+        except TRAuthError:
+            raise
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.info("TR-Transaktionen nicht geladen: %s", err)
         try:  # Zinssatz auf das Guthaben – bei jedem Abgleich neu
             rate = await self.tr.interest()
             if rate is not None:
@@ -800,7 +814,7 @@ class Engine:
             },
             "tr_split": split,
             "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
-            "performance": self._performance(holdings, sum(values[k] for k in pillars if not holdings.get(k)), today),
+            "performance": self._performance(holdings, mode, today),
             "market_error": market.get("_error"),
             "macro_status": {k: {"ok_at": v.get("ok_at"), "error": v.get("error")}
                              for k, v in self.state["macro"].items()},
@@ -908,20 +922,35 @@ class Engine:
                     "cost": size * pos["avg_buy"] if pos.get("avg_buy") else None,
                     "bid": bid,
                     "value": size * bid if bid else None,
-                    "since": (self.state.get("held_since", {}).get(isin) or {}).get("date"),
-                    "since_manual": (self.state.get("held_since", {}).get(isin) or {}).get("manual", False),
+                    "since": self._held_since(isin)[0],
+                    "since_manual": self._held_since(isin)[1],
                     "change_24h": (quote["last"] / quote["pre"] - 1
                                    if (quote := self._price(isin)).get("last") and quote.get("pre") else None),
                 })
         return out, unassigned
 
-    PERF_PERIODS = (("1M", 1), ("6M", 6), ("1J", 12))
+    PERF_PERIODS = ("1W", "1M", "3M", "6M", "YTD", "1J", "3J", "5J", "MAX")
 
-    def _performance(self, holdings: dict, cash: float, today: date) -> dict | None:
-        """Entwicklung der heutigen Positionen über 1 Monat, 6 Monate und 1 Jahr (aus Tagesschlusskursen).
+    @staticmethod
+    def _period_start(label: str, today: date) -> date | None:
+        if label == "1W":
+            return today - timedelta(days=7)
+        if label == "YTD":
+            return date(today.year, 1, 1)
+        if label == "MAX":
+            return None
+        months = {"1M": 1, "3M": 3, "6M": 6, "1J": 12, "3J": 36, "5J": 60}[label]
+        y, m = divmod(today.year * 12 + today.month - 1 - months, 12)
+        return date(y, m + 1, min(today.day, calendar.monthrange(y, m + 1)[1]))
 
-        Gerechnet mit den heutigen Stückzahlen – also: was die jetzigen Bestände in dem Zeitraum gewonnen oder
-        verloren haben. Cash zählt mit seinem heutigen Betrag (ohne Zinsen). Physisches Gold folgt Xetra-Gold.
+    def _performance(self, holdings: dict, mode: str, today: date) -> dict | None:
+        """Echter Verlauf der Wertpapiere über 1 Woche bis 5 Jahre (aus Tagesschlusskursen).
+
+        Die Stückzahl je Tag wird vom heutigen Bestand aus rückwärts über die Käufe und Verkäufe gerechnet
+        (Zeitleiste von Trade Republic, Papierdepot, Kaufdatum des physischen Golds). Gewinn eines Zeitraums =
+        Wert am Ende − Wert am Anfang − in der Zeit investiertes Geld; Käufe zählen also nicht als Gewinn.
+        Cash ist nicht enthalten. Junge Produkte werden vor ihrem ersten Kurs mit dem gleichwertigen
+        Säulen-Instrument fortgeschrieben.
         """
         def closes(isin: str) -> list[tuple[str, float]]:
             out = []
@@ -933,14 +962,13 @@ class Engine:
                     continue
             return sorted(out)
 
-        lines = []  # (Säule, Stückzahl, Kursreihe, heutiger Wert)
+        all_trades = self.state.get("trades", []) if mode == "depot" else []
+        lines = []  # dict: key, isin, name, size, series, trades
         for key, hs in holdings.items():
             for h in hs:
                 series = closes(GOLD_ISIN if h.get("physical") else h["isin"])
                 ref = h.get("counts_as")
                 if series and ref and ref != h["isin"]:
-                    # Junges Produkt (z. B. erst seit Kurzem gelistet): davor mit dem gleichwertigen Säulen-Instrument
-                    # fortschreiben, angeschlossen am ersten eigenen Kurs
                     ref_series = closes(ref)
                     first_day, first_close = series[0]
                     anchor = [c for d, c in ref_series if d <= first_day]
@@ -949,51 +977,92 @@ class Engine:
                         series = [(d, c * factor) for d, c in ref_series if d < first_day] + series
                 if not series or not h.get("size") or h.get("value") is None:
                     continue
-                lines.append((key, h["size"], series, h["value"]))
+                share = h.get("share") or 1.0
+                if h.get("physical"):
+                    trades = [{"date": h["since"], "shares": h["size"], "amount": -(h.get("cost") or 0)}] \
+                        if h.get("since") else []
+                elif mode == "paper":
+                    trades = [{"date": h["since"][:10], "shares": h["size"], "amount": -(h.get("cost") or 0)}] \
+                        if h.get("since") else []
+                else:
+                    trades = [{**t, "shares": t["shares"] * share if t.get("shares") is not None else None,
+                               "amount": t["amount"] * share if t.get("amount") is not None else None}
+                              for t in all_trades if t["isin"] == h["isin"]]
+                lines.append({"key": key, "isin": h["isin"], "name": h["name"], "size": h["size"],
+                              "series": series, "trades": trades, "known": bool(trades)})
         if not lines:
             return None
-        start = (today - timedelta(days=366)).isoformat()
-        days = sorted({d for _, _, series, _ in lines for d, _ in series if d >= start})
+
+        def close_on(series: list, day: str) -> float | None:
+            past = [c for d, c in series if d <= day]
+            return past[-1] if past else (series[0][1] if series else None)
+
+        # fehlende Stückzahlen aus Betrag und Kurs des Tages schätzen
+        for ln in lines:
+            for t in ln["trades"]:
+                if t.get("shares") is None and t.get("amount"):
+                    c = close_on(ln["series"], t["date"])
+                    t["shares"] = -t["amount"] / c if c else 0.0
+                if t.get("amount") is None:
+                    c = close_on(ln["series"], t["date"]) or 0
+                    t["amount"] = -t["shares"] * c
+        start = max(ln["series"][0][0] for ln in lines)
+        days = sorted({d for ln in lines for d, _ in ln["series"] if d >= start})
         if not days:
             return None
+        keys = list(holdings)
+        rows, flows = [], []  # flows je Zeile: [gesamt, je Säule …] – an dem Tag investiert (+) / entnommen (−)
+        idx = [0] * len(lines)
+        last = [None] * len(lines)
+        for day in days:
+            per = dict.fromkeys(keys, 0.0)
+            inflow = dict.fromkeys(keys, 0.0)
+            for i, ln in enumerate(lines):
+                series = ln["series"]
+                while idx[i] < len(series) and series[idx[i]][0] <= day:
+                    last[i] = series[idx[i]][1]
+                    idx[i] += 1
+                later = sum(t["shares"] for t in ln["trades"] if t["date"] > day)
+                held = max(ln["size"] - later, 0.0)
+                per[ln["key"]] += held * last[i]
+                inflow[ln["key"]] += sum(-t["amount"] for t in ln["trades"] if t["date"] == day)
+            vals = [round(per[k], 2) for k in keys]
+            rows.append([day, round(sum(vals), 2), *vals])
+            flows.append([round(sum(inflow.values()), 2), *[round(inflow[k], 2) for k in keys]])
+        today_s = today.isoformat()
+        if rows[-1][0] != today_s:
+            rows.append([today_s, *rows[-1][1:]])
+            flows.append([0.0] * (len(keys) + 1))
 
-        def value_at(day: str, key: str | None = None) -> float | None:
-            total = 0.0
-            for k, size, series, _ in lines:
-                if key and k != key:
-                    continue
-                past = [c for d, c in series if d <= day]
-                if not past:
-                    return None
-                total += size * past[-1]
-            return total
+        def index_at(day: str) -> int | None:
+            pos = None
+            for i, r in enumerate(rows):
+                if r[0] <= day:
+                    pos = i
+            return pos
 
-        now_total = sum(v for *_, v in lines) + cash
         periods = {}
-        for label, months in self.PERF_PERIODS:
-            day = S.add_months(S.month_key(today), -months) + today.isoformat()[7:]
-            try:
-                day = date.fromisoformat(day).isoformat()
-            except ValueError:  # 31. eines kürzeren Monats
-                day = (date.fromisoformat(day[:8] + "28")).isoformat()
-            then = value_at(day)
-            if then is None:
+        n = len(rows) - 1
+        for label in self.PERF_PERIODS:
+            begin = self._period_start(label, today)
+            i0 = 0 if begin is None else index_at(begin.isoformat())
+            if i0 is None or (begin is not None and begin.isoformat() < rows[0][0]):
                 periods[label] = None
                 continue
-            pos_now = sum(v for *_, v in lines)
-            gain = pos_now - then
-            by_pillar = {}
-            for key in holdings:
-                t = value_at(day, key)
-                n = sum(v for k, *_, v in lines if k == key)
-                if t is not None and n:
-                    by_pillar[key] = round(n - t, 2)
-            periods[label] = {"from": day, "gain": round(gain, 2), "pct": gain / (then + cash) if then + cash else None,
-                              "pillars": by_pillar}
-        series = [[d, round(v + cash, 2)] for d in days if (v := value_at(d)) is not None]
-        if series and series[-1][0] != today.isoformat():
-            series.append([today.isoformat(), round(now_total, 2)])
-        return {"periods": periods, "series": series, "cash": round(cash, 2)}
+            invested = [sum(f[j] for f in flows[i0 + 1:]) for j in range(len(keys) + 1)]
+            gain = rows[n][1] - rows[i0][1] - invested[0]
+            base = rows[i0][1] + max(invested[0], 0)
+            periods[label] = {"from": rows[i0][0], "gain": round(gain, 2), "invested": round(invested[0], 2),
+                              "pct": gain / base if base else None,
+                              "pillars": {k: round(rows[n][2 + j] - rows[i0][2 + j] - invested[1 + j], 2)
+                                          for j, k in enumerate(keys)}}
+        events = sorted(({"date": t["date"], "pillar": ln["key"], "isin": ln["isin"], "name": ln["name"],
+                          "amount": round(-t["amount"], 2), "shares": round(t["shares"], 4)}
+                         for ln in lines for t in ln["trades"] if t["date"] >= rows[0][0]),
+                        key=lambda e: e["date"])
+        return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events,
+                "history": all(ln["known"] for ln in lines),
+                "synced_trades_at": self.state.get("trades_at") if mode == "depot" else None}
 
     @staticmethod
     def _reconcile(depot: dict, holdings: dict, unassigned: list[dict]) -> dict | None:
@@ -1261,6 +1330,25 @@ class Engine:
         return await send_ha_service(self._http, service, target, text)
 
     # ------------------------------------------------------------ Aktionen
+
+    def _held_since(self, isin: str) -> tuple[str | None, str | bool]:
+        """(Datum, Herkunft): von Hand gesetzt > aus den Transaktionen > erster Abgleich."""
+        entry = self.state.get("held_since", {}).get(isin) or {}
+        if entry.get("manual"):
+            return entry["date"], True
+        # Beginn der laufenden Position: erster Kauf nach dem letzten Zeitpunkt, an dem sie leer war
+        size = ((self.snapshot or {}).get("positions") or {}).get(isin, {}).get("size") or 0
+        trades = [t for t in self.state.get("trades", []) if t["isin"] == isin and t.get("shares")]
+        if trades and size:
+            held, start = size, None
+            for t in reversed(trades):
+                held -= t["shares"]
+                start = t["date"]
+                if held <= 1e-6:
+                    break
+            if start:
+                return start, "trades"
+        return entry.get("date"), False
 
     async def set_held_since(self, isin: str, day: str | None) -> None:
         """Kaufdatum einer Depotposition von Hand setzen (Trade Republic liefert keins)."""
