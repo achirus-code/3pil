@@ -385,6 +385,23 @@ async def test_depot_empty_pillars_use_tr_cash(make_engine, monkeypatch):
     total = p["welt"]["value"] + 6000.0
     assert p["gold"]["amount"] == pytest.approx(total * 0.3, abs=0.01)
     assert p["gold"]["buy_budget"] == pytest.approx(total * 0.3, abs=0.01)
+    r = eng.data["reconcile"]
+    assert r["cash"] == 6000.0 and r["counted"] == pytest.approx(p["welt"]["value"]) and r["unassigned"] == 0
+
+
+async def test_depot_uses_trade_republic_values(make_engine, monkeypatch):
+    # Bewertet wie Trade Republic, unbekannte Positionen werden im Abgleich ausgewiesen
+    async def portfolio(self):
+        return {"positions": {"IE00B3YLTY66": {"size": 100.0, "avg_buy": 10.0, "tr_value": 1234.0},
+                              "US0378331005": {"size": 10.0, "avg_buy": 150.0, "tr_value": 2000.0}}, "cash": 500.0}
+
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    eng = await make_engine()
+    eng.tr.cookies = {"tr_session": "s"}
+    d = await eng.refresh()
+    assert d["pillars"]["welt"]["value"] == pytest.approx(1234.0)
+    r = d["reconcile"]
+    assert r["tr_positions"] == 3234.0 and r["unassigned"] == pytest.approx(2000.0)
 
 
 async def test_web_gold_api(make_engine, aiohttp_client):

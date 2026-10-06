@@ -282,6 +282,16 @@ class SaeulenBase extends HTMLElement {
     </div>`;
   }
 
+  reconcileLine(r) {
+    if (!r) return "";
+    const parts = [`in den Säulen ${eur(r.counted, 0)}`, `Cash ${eur(r.cash || 0, 0)}`];
+    if (r.unassigned) parts.push(`<b>nicht zugeordnet ${eur(r.unassigned, 0)}</b> (zählt nicht mit)`);
+    const tr = r.tr_positions != null
+      ? `Trade Republic: Wertpapiere ${eur(r.tr_positions, 0)} + Cash ${eur(r.cash || 0, 0)} = <b>${eur(r.tr_positions + (r.cash || 0), 0)}</b> · ` : "";
+    const miss = r.missing_price && r.missing_price.length ? ` · ohne Kurs: ${r.missing_price.map(esc).join(", ")}` : "";
+    return `<div class="note">${tr}App: ${parts.join(" · ")}${miss}</div>`;
+  }
+
   interestLine(z) {
     if (!z) return "";
     if (z.rate == null) return `<div class="note">Zinsen auf Cash: Satz noch unbekannt – kommt beim nächsten Abgleich mit Trade Republic.</div>`;
@@ -326,6 +336,7 @@ class SaeulenBase extends HTMLElement {
       <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th></tr>
         ${st.rows.map(row).join("")}</table>
       ${this.interestLine(st.interest)}
+      ${this.reconcileLine(d.reconcile)}
       <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
       ${this.history(d)}
     </div>`;

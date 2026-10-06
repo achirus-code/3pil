@@ -739,6 +739,7 @@ class Engine:
                 "unassigned": unassigned,
             },
             "tr_split": split,
+            "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
             "market_error": market.get("_error"),
             "macro_status": {k: {"ok_at": v.get("ok_at"), "error": v.get("error")}
                              for k, v in self.state["macro"].items()},
@@ -807,6 +808,8 @@ class Engine:
         unassigned: list[dict] = []
         for isin, pos in (depot.get("positions") or {}).items():
             bid = self._price(isin).get("bid")
+            if pos.get("tr_value") and pos.get("size"):
+                bid = pos["tr_value"] / pos["size"]  # Kurs so, wie Trade Republic die Position bewertet
             counts_as = S.resolve_isin(isin, PILLARS, extras)
             claim: list[str] = []
             if counts_as:
@@ -846,6 +849,23 @@ class Engine:
                     "value": size * bid if bid else None,
                 })
         return out, unassigned
+
+    @staticmethod
+    def _reconcile(depot: dict, holdings: dict, unassigned: list[dict]) -> dict | None:
+        """Abgleich mit Trade Republic: was TR zeigt und was davon in den Säulen zählt."""
+        if not depot.get("connected"):
+            return None
+        tr_values = [p.get("tr_value") for p in (depot.get("positions") or {}).values()]
+        counted = sum(h.get("value") or 0 for hs in holdings.values() for h in hs if not h.get("physical"))
+        missing_price = [u["isin"] for u in unassigned if u.get("value") is None] + \
+            [h["isin"] for hs in holdings.values() for h in hs if h.get("value") is None]
+        return {
+            "tr_positions": round(sum(tr_values), 2) if tr_values and all(v is not None for v in tr_values) else None,
+            "cash": depot.get("cash"),
+            "counted": round(counted, 2),
+            "unassigned": round(sum(u.get("value") or 0 for u in unassigned), 2),
+            "missing_price": missing_price,
+        }
 
     def _paper_holdings(self, pillars: dict) -> dict[str, list[dict]]:
         out: dict[str, list[dict]] = {}

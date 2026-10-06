@@ -144,12 +144,14 @@ async def test_qr_expired_and_throttled():
 async def test_portfolio_v2_amount_objects():
     port = {"categories": [{"positions": [{"isin": "IE00B3YLTY66", "netSize": "10",
                                            "averageBuyIn": {"value": "200.5", "currency": "EUR"},
+                                           "netValue": 2125.0,
                                            "performanceSinceBuyAbsolute": {"value": "120"}}]}]}
     seen = []
     tr = client(lambda p: seen.append(p[0]["type"]) or [port, []])
     res = await tr.portfolio()
     assert seen[0] == "compactPortfolioByTypeV2"
-    assert res["positions"]["IE00B3YLTY66"] == {"size": 10.0, "avg_buy": 200.5, "tr_pnl": 120.0}
+    assert res["positions"]["IE00B3YLTY66"] == {"size": 10.0, "avg_buy": 200.5, "tr_value": 2125.0,
+                                                    "tr_pnl": 120.0}
 
 
 def test_find_rate():
