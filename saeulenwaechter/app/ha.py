@@ -123,7 +123,7 @@ def build_states(d: dict) -> dict[str, dict[str, Any]]:
         "friendly_name": f"{NAME} Dollar-Signal", "icon": "mdi:currency-usd", "wert": d["dollar"].get("value")})
     put(f"sensor.{P}_modus", "Echtes Depot" if d.get("mode") == "depot" else "Papierdepot", {
         "friendly_name": f"{NAME} Modus", "icon": "mdi:briefcase-account",
-        "tr_verbunden": d["depot"].get("connected"), "fehler": d["depot"].get("error"),
+        "tr_daten": d["depot"].get("connected"), "stand": d["depot"].get("synced_at"), "fehler": d["depot"].get("error"),
         "positionen": d["depot"].get("positions"), "nicht_zugeordnet": d["depot"].get("unassigned"),
         "tr_verteilung": d.get("tr_split"), "kursdaten_fehler": d.get("market_error"),
         "wirtschaftsdaten": d.get("macro_status")})
@@ -141,8 +141,8 @@ def build_states(d: dict) -> dict[str, dict[str, Any]]:
         "friendly_name": f"{NAME} Handlung nötig", "icon": "mdi:alert-octagon", "device_class": "problem",
         "anweisungen": [t["text"] for t in d.get("todo") or []]})
     put(f"binary_sensor.{P}_trade_republic", _onoff(d["depot"].get("connected")), {
-        "friendly_name": f"{NAME} Trade Republic verbunden", "device_class": "connectivity",
-        "fehler": d["depot"].get("error")})
+        "friendly_name": f"{NAME} Trade-Republic-Daten", "icon": "mdi:bank-check",
+        "stand": d["depot"].get("synced_at"), "fehler": d["depot"].get("error")})
     return out
 
 

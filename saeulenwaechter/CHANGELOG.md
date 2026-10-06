@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.0
+
+- Trade Republic bleibt nie verbunden: Nach dem Login liest die App einmal Positionen, Cash und Zinssatz, speichert den Stand und meldet sich sofort wieder ab. Die Kurse laufen weiter. Button **Neu synchronisieren** für einen neuen Abgleich (erneut anmelden).
+- Aufgeräumte Säulenansicht: ein Balken je Säule in der Säulenfarbe, Produkte als Abschnitte, Cash schraffiert; kein Lila mehr.
+- Nicht zugeordnete Positionen stehen jetzt oben in den letzten Meldungen.
+
 ## 2.2.2
 
 - Letzte Meldungen in einem kleinen Fenster zum Scrollen.

@@ -150,7 +150,12 @@ class Engine:
 
     @property
     def use_depot(self) -> bool:
-        return bool(self.options.get(CONF_USE_DEPOT, True)) and self.tr.logged_in
+        return bool(self.options.get(CONF_USE_DEPOT, True)) and (self.tr.logged_in or bool(self.snapshot))
+
+    @property
+    def snapshot(self) -> dict | None:
+        """Zuletzt bei Trade Republic gelesene Positionen und Cash (die Session ist danach wieder geschlossen)."""
+        return self.state.get("depot_snapshot")
 
     async def async_load(self) -> None:
         try:
@@ -193,7 +198,9 @@ class Engine:
     # --------------------------------------------------------------- Login
 
     def login_status(self) -> dict:
+        snap = self.snapshot or {}
         return {"logged_in": self.tr.logged_in, "phone": self.state.get("phone"),
+                "synced_at": snap.get("synced_at"), "positions": len(snap.get("positions") or {}),
                 "login_at": self.state.get("login_at"),
                 "pending": self._login_client is not None,
                 "use_depot": bool(self.options.get(CONF_USE_DEPOT, True))}
@@ -318,8 +325,8 @@ class Engine:
             self.state["login_method"] = "qr"
             self.state["sent"].pop("auth", None)
             await self.async_save()
+        await self.refresh()  # synchronisiert und schließt die Session wieder
         qr["status"] = "done"
-        await self.refresh()
         if self.on_login:
             await self.on_login()
 
@@ -330,10 +337,12 @@ class Engine:
         self._qr = None
 
     async def logout(self) -> None:
+        """Vergisst die gespeicherten Depotdaten – danach rechnet die App wieder mit dem Papierdepot."""
         async with self._lock:
-            self.tr.cookies = {}
+            await self.tr.logout()
             self.state["cookies"] = {}
             self.state["login_at"] = None
+            self.state.pop("depot_snapshot", None)
             await self.async_save()
         await self.refresh()
 
@@ -428,40 +437,55 @@ class Engine:
         return m.get("data")
 
     async def _update_depot(self) -> dict:
-        depot: dict[str, Any] = {"connected": False, "error": None, "positions": {}, "cash": None}
-        if not (self.options.get(CONF_USE_DEPOT, True) and self.tr.logged_in):
-            depot["error"] = "nicht eingeloggt" if not self.tr.logged_in else "deaktiviert"
+        """Depotdaten: frisch von Trade Republic, solange eine Session offen ist – danach wird sie geschlossen und
+        es gilt der gespeicherte Stand (Stückzahlen und Cash), bewertet mit aktuellen Kursen."""
+        depot: dict[str, Any] = {"connected": False, "error": None, "positions": {}, "cash": None, "synced_at": None}
+        if not self.options.get(CONF_USE_DEPOT, True):
+            depot["error"] = "deaktiviert"
             return depot
-        try:
-            p = await self.tr.portfolio()
-            depot.update(p, connected=True)
-            try:  # Zinssatz auf das Guthaben – bei jedem Abgleich neu
-                rate = await self.tr.interest()
-                if rate is not None:
-                    self.state["interest"] = {"rate": rate, "at": self.now().isoformat()}
-            except TRAuthError:
-                raise
+        if self.tr.logged_in:
+            try:
+                await self._sync_depot()
+            except TRAuthError as err:
+                depot["error"] = "auth"
+                _LOGGER.warning("Trade-Republic-Login abgelaufen: %s", err)
             except Exception as err:  # noqa: BLE001
-                _LOGGER.info("TR-Zinssatz nicht geladen: %s", err)
-            # Kurse für Positionen außerhalb der Säulen-Instrumente
-            extra = [i for i in p["positions"] if i not in _all_isins()]
-            if extra:
-                try:
-                    res = await self.tr.market_data(extra, EXCHANGE, candles=False,
-                                                    names=any(not self.state["market"].get(i, {}).get("name")
-                                                              for i in extra))
-                    for isin, d in res.items():
-                        m = self.state["market"].setdefault(isin, {})
-                        m.update({k: v for k, v in d.items() if v})
-                except Exception:  # noqa: BLE001
-                    pass
-        except TRAuthError as err:
-            depot["error"] = "auth"
-            _LOGGER.warning("Trade-Republic-Login abgelaufen: %s", err)
-        except Exception as err:  # noqa: BLE001
-            depot["error"] = str(err)
-            _LOGGER.warning("Depot nicht geladen: %s", err)
+                depot["error"] = str(err)
+                _LOGGER.warning("Depot nicht geladen: %s", err)
+            finally:
+                await self.tr.logout()  # nie verbunden bleiben
+        snap = self.snapshot
+        if not snap:
+            depot["error"] = depot["error"] or "nicht synchronisiert"
+            return depot
+        depot.update(positions=copy.deepcopy(snap["positions"]), cash=snap.get("cash"),
+                     synced_at=snap.get("synced_at"), connected=True)
+        # Kurse für Positionen außerhalb der Säulen-Instrumente (öffentliche Kursdaten, kein Login nötig)
+        extra = [i for i in depot["positions"] if i not in _all_isins()]
+        if extra:
+            try:
+                res = await self.tr.market_data(extra, EXCHANGE, candles=False,
+                                                names=any(not self.state["market"].get(i, {}).get("name")
+                                                          for i in extra))
+                for isin, d in res.items():
+                    m = self.state["market"].setdefault(isin, {})
+                    m.update({k: v for k, v in d.items() if v})
+            except Exception:  # noqa: BLE001
+                pass
         return depot
+
+    async def _sync_depot(self) -> None:
+        """Einmal lesen: Positionen, Cash und Zinssatz; der Stand wird gespeichert."""
+        p = await self.tr.portfolio()
+        self.state["depot_snapshot"] = {"positions": p["positions"], "cash": p.get("cash"),
+                                        "synced_at": self.now().isoformat()}
+        self.state["sent"].pop("auth", None)
+        try:  # Zinssatz auf das Guthaben – bei jedem Abgleich neu
+            rate = await self.tr.interest()
+            if rate is not None:
+                self.state["interest"] = {"rate": rate, "at": self.now().isoformat()}
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.info("TR-Zinssatz nicht geladen: %s", err)
 
     # -------------------------------------------------------------- Rechnen
 
@@ -737,6 +761,7 @@ class Engine:
                                   "counts_as": S.resolve_isin(i, PILLARS, self.extra_isins)}
                               for i, p in (depot.get("positions") or {}).items()},
                 "unassigned": unassigned,
+                "synced_at": depot.get("synced_at"),
             },
             "tr_split": split,
             "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
@@ -808,8 +833,8 @@ class Engine:
         unassigned: list[dict] = []
         for isin, pos in (depot.get("positions") or {}).items():
             bid = self._price(isin).get("bid")
-            if pos.get("tr_value") and pos.get("size"):
-                bid = pos["tr_value"] / pos["size"]  # Kurs so, wie Trade Republic die Position bewertet
+            if not bid and pos.get("tr_value") and pos.get("size"):
+                bid = pos["tr_value"] / pos["size"]  # ohne aktuellen Kurs: Bewertung von TR beim letzten Abgleich
             counts_as = S.resolve_isin(isin, PILLARS, extras)
             claim: list[str] = []
             if counts_as:

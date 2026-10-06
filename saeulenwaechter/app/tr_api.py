@@ -293,6 +293,15 @@ class TradeRepublic:
         if status >= 400:
             raise TRError(f"Session-Verlängerung fehlgeschlagen (HTTP {status}).")
 
+    async def logout(self) -> None:
+        """Beendet die Session bei Trade Republic und vergisst die Cookies (Fehler sind egal)."""
+        if self.cookies:
+            try:
+                await self._request("POST", "/api/v1/auth/web/logout", login=True)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("TR-Logout: %s", err)
+        self.cookies = {}
+
     async def account(self) -> dict:
         status, body = await self._request("GET", "/api/v2/auth/account")
         if status in (401, 403):
