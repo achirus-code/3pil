@@ -92,6 +92,12 @@ async def test_paper_decision_messages_and_state_file(make_engine, sent, tmp_pat
     assert d["pillars"]["welt"]["signals"][0]["title"] == "Entscheidung Okt. 2026"
     assert len(sent) == 1 and "Monatsentscheidung Okt. 2026" in sent[0]
     assert len(d["value_history"]) == 1
+    # Bestandsbalken auch im Papierdepot: Welt und Gold investiert, Anleihen-Anteil als Cash
+    split = d["tr_split"]
+    assert split["source"] == "paper"
+    rows = {r["key"]: r for r in split["rows"]}
+    assert rows["welt"]["ist"] == pytest.approx(0.4, abs=0.01) and rows["anleihen"]["ist"] == 0
+    assert split["cash"]["ist"] == pytest.approx(0.3, abs=0.01) and split["cash"]["soll"] == pytest.approx(0.3)
 
     await eng.refresh()
     assert len(sent) == 1  # nichts Neues

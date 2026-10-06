@@ -246,7 +246,7 @@ class SaeulenBase extends HTMLElement {
       : "";
     return `<div class="bar tr" style="overflow:hidden">${fills}
         <div class="mark" style="left:${t.soll * 100}%"></div></div>
-      <div class="trv num${warn ? " warn" : ""}">${label ? esc(label) + " · " : ""}Trade Republic ${Math.round(t.ist * 100)} % · soll ${Math.round(t.soll * 100)} % · ${eur(t.value, 0)}</div>${legend}`;
+      <div class="trv num${warn ? " warn" : ""}">${label ? esc(label) + " · " : ""}${split.source === "paper" ? "Papierdepot" : "Trade Republic"} ${Math.round(t.ist * 100)} % · soll ${Math.round(t.soll * 100)} % · ${eur(t.value, 0)}</div>${legend}`;
   }
 
   trExtra(d) {
@@ -257,7 +257,7 @@ class SaeulenBase extends HTMLElement {
     const list = un.length ? `<div class="note warn">Nicht zugeordnet: ${un.map((u) =>
       `${esc(u.name)} (${esc(u.isin)}, ${eur(u.value, 0)})${u.suggestion_name ? " – vermutlich " + esc(u.suggestion_name) : ""}`).join("; ")}.
       In den Optionen unter „Weitere ISINs …“ eintragen, dann zählt die Position zur Säule.</div>` : "";
-    const legend = split ? `<div class="note"><span style="color:var(--sw-tr)">■</span> Verteilung bei Trade Republic (erkannte Positionen + Cash = ${eur(split.base, 0)}), Strich = Soll laut aktueller Entscheidung.</div>` : "";
+    const legend = split ? `<div class="note"><span style="color:var(--sw-tr)">■</span> Aktueller Bestand ${split.source === "paper" ? "im Papierdepot" : "bei Trade Republic (erkannte Positionen"} + Cash = ${eur(split.base, 0)}${split.source === "paper" ? "" : ")"}, Strich = Soll laut aktueller Entscheidung.</div>` : "";
     return cash + legend + list;
   }
 

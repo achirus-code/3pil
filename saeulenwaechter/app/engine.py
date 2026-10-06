@@ -485,15 +485,18 @@ class Engine:
         overview = S.pillars_overview(values, amounts)
         # Verteilung bei Trade Republic: nur erkannte Positionen + Cash, gegen das Soll laut Strategie
         split = None
-        if mode == "depot" and depot.get("connected"):
+        if mode == "paper" or depot.get("connected"):
             tr_values = {k: sum(h.get("value") or 0 for h in holdings.get(k, [])) for k in pillars}
             soll = {r["key"]: r["soll"] for r in overview["rows"]}
             targets = {k: (p["st"].get("target") if p["st"].get("month") else p["res"].get("target"))
                        for k, p in pillars.items()}
-            split = S.tr_split(tr_values, targets, soll, depot.get("cash"),
+            # Papierdepot: Cash ist, was die Säulen ohne Position gerade halten (Erlös bzw. Betrag)
+            cash = depot.get("cash") if mode == "depot" else sum(values[k] for k in pillars if not holdings.get(k))
+            split = S.tr_split(tr_values, targets, soll, cash,
                                sum(u.get("value") or 0 for u in unassigned),
                                {k: [{"isin": h["isin"], "name": h["name"], "value": h.get("value") or 0}
                                     for h in holdings.get(k, [])] for k in pillars})
+            split["source"] = mode
         for row in overview["rows"]:
             row["name"] = out_pillars[row["key"]]["name"]
             row["color"] = out_pillars[row["key"]]["color"]
