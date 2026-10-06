@@ -237,7 +237,7 @@ class SaeulenBase extends HTMLElement {
     const t = key === "cash" ? split.cash : (split.rows || []).find((x) => x.key === key);
     if (!t) return "";
     const diff = (t.ist - t.soll) * 100;
-    const warn = Math.abs(diff) >= 5;
+    const warn = Math.abs(diff) > 5;
     // mehrere Produkte einer Säule: je ein Abschnitt, abgestuft eingefärbt
     const parts = t.parts && t.parts.length > 1 ? t.parts : null;
     let left = 0;
@@ -374,7 +374,7 @@ class SaeulenBase extends HTMLElement {
   pillars(d, active) {
     const ov = d.overview;
     const rows = ov.rows.map((r) => {
-      const warn = Math.abs(r.diff_pp) >= 5;
+      const warn = Math.abs(r.diff_pp) > (ov.tolerance_pp || 5);
       const isActive = r.key === active;
       return `<div class="pillar">
         <div class="head"><span>${isActive ? `<b>${esc(r.name)}</b>` : esc(r.name)}</span>
@@ -388,7 +388,9 @@ class SaeulenBase extends HTMLElement {
     const note = ov.due
       ? `<div class="note warn">Um ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp von den Soll-Anteilen abgewichen – die Beträge nach dem Pfeil stellen sie wieder her.</div>
          <div class="buttons" style="margin-top:8px"><button class="sw" data-action="rebalance">Angleichung übernehmen</button></div>`
-      : `<div class="note">Nahe an den Soll-Anteilen (Ist / Soll) – einmal im Jahr angleichen.</div>`;
+      : ov.drift_pp >= 0.5
+        ? `<div class="note">Kleine Abweichung (höchstens ${ov.drift_pp.toLocaleString("de-DE", { maximumFractionDigits: 1 })} Pp) – im Rahmen von ±${ov.tolerance_pp || 5} Pp, kein Handlungsbedarf. Angeglichen wird erst darüber oder einmal im Jahr.</div>`
+        : `<div class="note">Nahe an den Soll-Anteilen (Ist / Soll) – einmal im Jahr angleichen.</div>`;
     return `<div class="section"><div class="label">Säulen · ${eur(ov.total, 0)}</div>${rows}${note}</div>`;
   }
 

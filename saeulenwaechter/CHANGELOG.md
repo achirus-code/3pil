@@ -4,6 +4,7 @@
 
 - Echtes Depot: Beträge und Kaufbudgets immer als 40/30/30 vom tatsächlichen Depotwert; der eingestellte Gesamtbetrag gilt nur noch für das Papierdepot.
 - Angleichen-Tabelle passt auf schmale Karten.
+- Kleine Abweichungen bis ±5 Prozentpunkte lösen keine rote Meldung mehr aus; sie zeigen nur die Balken (mit Hinweis „im Rahmen“).
 - Positionen werden mit dem Wert bewertet, den Trade Republic selbst liefert (statt eigenem Geldkurs).
 - Abgleich unter der Statistik: Wert laut Trade Republic, was davon in den Säulen zählt, Cash und nicht zugeordnete Positionen.
 
