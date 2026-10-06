@@ -1,3 +1,4 @@
+import calendar
 from datetime import date
 
 import pytest
@@ -166,7 +167,7 @@ def test_pillars_overview_drift():
 def test_recession_evaluators():
     un = [(S.add_months("2026-09", -i), 4.0) for i in range(12, 0, -1)] + [("2026-09", 4.5)]
     assert S.eval_unemployment(un)["state"] == "warn"
-    weeks = [("2025-09-06", 100.0), ("2025-09-13", 100.0), ("2026-09-05", 110.0), ("2026-09-12", 110.0)]
+    weeks = [("2025-09-06", 100.0), ("2025-09-27", 100.0), ("2026-09-05", 110.0), ("2026-09-26", 110.0)]
     assert S.eval_claims(weeks, date(2026, 10, 6))["state"] == "warn"
     yc = [("2025-04-30", -0.1), ("2026-09-30", 1.0)]
     r = S.eval_yield_curve(yc, date(2026, 10, 6))
@@ -269,3 +270,20 @@ def test_small_drift_within_tolerance_is_not_due():
     assert ov["drift_pp"] == pytest.approx(5.0) and not ov["due"] and ov["tolerance_pp"] == 5.0
     ov = S.pillars_overview({"welt": 45200, "gold": 24800, "anleihen": 30000}, amounts)  # 5,2 Pp
     assert ov["due"]
+
+
+def test_claims_skip_month_whose_last_week_is_not_reported_yet():
+    # Okt. 2026 endet mit der Woche bis Sa., 31.10. – am 3.11. ist sie noch nicht gemeldet
+    def month(m, value):
+        """Alle Samstage des Monats als gemeldete Wochen."""
+        y, mo = int(m[:4]), int(m[5:])
+        return [(f"{m}-{d:02d}", value) for d in range(1, calendar.monthrange(y, mo)[1] + 1)
+                if date(y, mo, d).weekday() == 5]
+
+    weeks = month("2025-09", 100.0) + month("2025-10", 100.0) + month("2026-09", 100.0) \
+        + [w for w in month("2026-10", 200.0) if w[0] != "2026-10-31"]
+    r = S.eval_claims(weeks, date(2026, 11, 3))
+    assert r["state"] == "ok" and "Sep. 2026" in r["value"]  # nicht der unvollständige Oktober
+    r = S.eval_claims(weeks + [("2026-10-31", 200.0)], date(2026, 11, 6))
+    assert r["state"] == "warn" and "Okt. 2026" in r["value"]
+    assert S._last_saturday("2026-10") == "2026-10-31" and S._last_saturday("2026-09") == "2026-09-26"
