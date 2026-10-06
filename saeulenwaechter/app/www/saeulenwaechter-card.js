@@ -276,10 +276,10 @@ class SaeulenBase extends HTMLElement {
     if (!z) return "";
     if (z.rate == null) return `<div class="note">Zinsen auf Cash: Satz noch unbekannt – kommt beim nächsten Abgleich mit Trade Republic.</div>`;
     const rate = `${(z.rate * 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} % p. a.`;
-    const src = { option: "eigener Wert", trade_republic: "laut Trade Republic", ezb: "EZB-Einlagensatz, den Trade Republic in der Regel zahlt" }[z.source] || "";
+    const src = { option: "eigener Wert", trade_republic: "laut Trade Republic" }[z.source] || "";
     const earned = z.earned ? ` · bisher gutgeschrieben ${eur(z.earned, 2)}` : "";
     return `<div class="interest"><span>💶 Zinsen auf Cash</span>
-      <b>${rate}</b> <span class="muted">(${src})</span> auf ${eur(z.cash, 0)} ≈ <b>${eur(z.per_year, 0)} im Jahr</b>${earned}</div>`;
+      <b>${rate}</b>${src ? ` <span class="muted">(${src})</span>` : ""} auf ${eur(z.cash, 0)} ≈ <b>${eur(z.per_year, 0)} im Jahr</b>${earned}</div>`;
   }
 
   rebalanceTable(rows) {
