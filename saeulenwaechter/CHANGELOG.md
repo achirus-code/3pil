@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.6.0
+
+- Statistik zeigt den Gewinn von heute: gesamt (in € und %) und je Säule, aus der Tagesänderung der Positionen; physisches Gold mit der Änderung des Goldpreises.
+
 ## 2.5.2
 
 - QR-Code wird quadratisch und vollständig angezeigt (SVG mit viewBox, feste Größe, breiterer Rand) – vorher konnte er beschnitten oder verzerrt sein und ließ sich nicht scannen.

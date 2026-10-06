@@ -924,6 +924,8 @@ class Engine:
                 "bid": bid,
                 "value": paper["qty"] * bid if bid else None,
                 "since": paper.get("since"),
+                "change_24h": (q["last"] / q["pre"] - 1
+                               if (q := self._price(paper["isin"])).get("last") and q.get("pre") else None),
             }]
         return out
 

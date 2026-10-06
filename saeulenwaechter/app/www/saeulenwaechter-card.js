@@ -302,20 +302,35 @@ class SaeulenBase extends HTMLElement {
     const color = (v) => v == null || Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
     const signed = (v) => v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
     const t = st.total;
+    // Gewinn heute: Tagesänderung je Position (physisches Gold mit der Änderung des Goldpreises)
+    const today = {};
+    let todayTotal = null;
+    for (const p of Object.values(d.pillars || {})) {
+      for (const h of p.held || []) {
+        const c = h.physical ? p.change_24h : h.change_24h;
+        if (c == null || h.value == null) continue;
+        const v = h.value - h.value / (1 + c);
+        today[p.key] = (today[p.key] || 0) + v;
+        todayTotal = (todayTotal || 0) + v;
+      }
+    }
+    const todayPct = todayTotal != null && t.value ? todayTotal / (t.value - todayTotal) : null;
     const row = (r) => `<tr>
         <td>${esc(r.name)}${r.invested === false && r.value ? ` <span class="muted">· in Cash</span>` : ""}</td>
         <td class="num">${eur(r.value, 0)}</td>
         <td class="num">${r.cost != null ? eur(r.cost, 0) : (r.invested === false ? "Cash" : "–")}</td>
         <td class="num" style="color:${color(r.pnl)}">${signed(r.pnl)}</td>
-        <td class="num" style="color:${color(r.pnl)}">${r.pnl_pct != null ? pct(r.pnl_pct) : ""}</td></tr>`;
+        <td class="num" style="color:${color(r.pnl)}">${r.pnl_pct != null ? pct(r.pnl_pct) : ""}</td>
+        <td class="num" style="color:${color(today[r.key])}">${today[r.key] != null ? signed(today[r.key]) : "–"}</td></tr>`;
     return `<div class="section">
       <div class="label">Säulenstatistik · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
       <div class="stat-top num">
         <div><div class="k">Gesamtwert</div><div class="big">${eur(t.value, 0)}</div></div>
         <div><div class="k">Einstand</div><div class="mid">${t.cost != null ? eur(t.cost, 0) : "–"}</div></div>
         <div><div class="k">Gewinn / Verlust</div><div class="mid" style="color:${color(t.pnl)}">${signed(t.pnl)}${t.pnl_pct != null ? ` · ${pct(t.pnl_pct)}` : ""}</div></div>
+        <div><div class="k">Heute</div><div class="mid" style="color:${color(todayTotal)}">${signed(todayTotal)}${todayPct != null ? ` · ${pct(todayPct)}` : ""}</div></div>
       </div>
-      <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th></tr>
+      <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th><th>Heute</th></tr>
         ${st.rows.map(row).join("")}</table>
       ${this.interestLine(st.interest)}
       ${this.reconcileLine(d.reconcile)}
