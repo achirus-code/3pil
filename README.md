@@ -1,0 +1,94 @@
+# 🏛️ Säulenwächter
+
+Home-Assistant-Integration für die **3-Säulen-Strategie** (Welt 40 % · Gold 30 % · Euro-Anleihen 30 %,
+Backtest-Variante „C7“, siehe [docs/3-saeulen-strategie.md](docs/3-saeulen-strategie.md)).
+
+Der Säulenwächter rechnet die komplette Monatslogik selbst nach – Trendsignale, Rezessionszeichen,
+Dollar-Signal, Ausweich-Anleihen, Umschaltkurse, Säulen-Drift – zeigt alles als Entitäten, Lovelace-Karte und
+eigenes Seitenleisten-Panel an und meldet **jede neue Erkenntnis per WhatsApp** (CallMeBot) mit einer konkreten
+Anweisung.
+
+## Installation
+
+1. Ordner `custom_components/saeulenwaechter` nach `<HA-config>/custom_components/` kopieren
+   (oder dieses Repo als benutzerdefiniertes HACS-Repository hinzufügen).
+2. Home Assistant neu starten.
+3. *Einstellungen › Geräte & Dienste › Integration hinzufügen › Säulenwächter*.
+   - **Mit Trade Republic verbinden (einmalig):** Telefonnummer + PIN, danach die Anmeldung in der TR-App
+     bestätigen (oder Authenticator-Code eingeben). Gespeichert wird **nur die Web-Session**, nicht die PIN.
+     Die Session wird alle 15 Minuten automatisch verlängert. Läuft sie doch ab, startet HA einen
+     „Erneut anmelden“-Dialog und du bekommst eine WhatsApp.
+   - **Ohne Login – Papierdepot:** alle Signale + simuliertes Depot (Market-Order, 1 € Gebühr, Erlös wieder anlegen).
+4. WhatsApp: Nummer (z. B. `4917…`) und CallMeBot-API-Key eintragen. Mit dem Button
+   **„WhatsApp-Testnachricht“** prüfen.
+
+## Was angezeigt wird
+
+**Panel „Säulenwächter“ in der Seitenleiste** und die **Karte** `custom:saeulenwaechter-card`:
+
+```yaml
+type: custom:saeulenwaechter-card          # Übersicht aller drei Säulen + Ist/Soll
+---
+type: custom:saeulenwaechter-card
+pillar: welt                               # Detailansicht: Hero, Position, Signale, Monatsstreifen, Säulen
+```
+
+**Entitäten** (je Säule `welt`, `gold`, `anleihen`):
+
+| Entität | Inhalt |
+|---|---|
+| `sensor.saeulenwaechter_<säule>_zustand` | Investiert / Gesichert / Ausgewichen / Cash, Attribute: alle Signalzeilen, Historie, Ziel |
+| `sensor.saeulenwaechter_<säule>_aktion` | halten / kaufen / verkaufen / wechseln (Depot vs. Ziel) |
+| `sensor.saeulenwaechter_<säule>_wert`, `_ist_anteil` | Wert zum Geldkurs, Ist-% (Attribut Soll-%) |
+| `sensor.saeulenwaechter_<säule>_umschaltkurs`, `_kurs` | Monatsschluss, bei dem das Signal kippt; aktueller Kurs |
+| `binary_sensor.saeulenwaechter_<säule>_trend` / `_wuerde_kippen` | Trend an/aus; würde zum Monatsende kippen |
+| `sensor.saeulenwaechter_depotwert`, `_drift`, `_naechste_pruefung`, `_euro_zins`, `_dollar`, `_modus` | Übersicht |
+| `binary_sensor.saeulenwaechter_rezession_{unemployment,claims,yield_curve}` | Rezessionszeichen |
+| `binary_sensor.saeulenwaechter_angleichung_faellig`, `_trade_republic` | Drift ≥ 5 Pp; Login-Status |
+| `button.saeulenwaechter_{aktualisieren,angleichen,testnachricht}` | Aktionen |
+
+Services: `saeulenwaechter.refresh`, `saeulenwaechter.apply_rebalance`, `saeulenwaechter.send_test_message`.
+
+## Wann kommt eine WhatsApp?
+
+| Erkenntnis | Beispiel |
+|---|---|
+| Monatsentscheidung (erster Handelstag, LSX offen) | „📅 Monatsentscheidung Nov. 2026 – Welt: Trend abwärts – Rezessionszeichen: US-Zinskurve ➜ WECHSELN: SPDR … komplett verkaufen, danach den Erlös in … anlegen“ |
+| Depot weicht vom Ziel ab (mit Login) | „🛠 Gold: KAUFEN: Xetra-Gold für ca. 30.000 €“ – und „✅ umgesetzt“, sobald es im Depot liegt |
+| Signal würde zum Monatsende kippen (letzte 7 Tage) | „👀 Welt: Trend würde kippen – heute 10,10 € unter Umschaltkurs 10,17 €“ |
+| Rezessionszeichen wechselt | „⚠️ US-Erstanträge warnt jetzt …“ |
+| Angleichen fällig (≥ 5 Pp) bzw. jährlich (Monat einstellbar) | „⚖️ Welt 50.000 € → 40.000 € …“ |
+| Trade-Republic-Login abgelaufen | „🔑 bitte neu anmelden“ |
+
+Jede Erkenntnis wird genau einmal gemeldet; mehrere gleichzeitige werden zu einer Nachricht zusammengefasst.
+
+## Datenquellen
+
+| Daten | Quelle | Login |
+|---|---|---|
+| Tageskerzen (≈ 5 J.), Kurs, Name | TR-WebSocket `aggregateHistoryLight`, `ticker`, `instrument` (LSX) | nein |
+| Depot, Cash | TR-WebSocket `compactPortfolioByType`, `cash` | ja |
+| Euribor 3M, EUR/USD | EZB Data API | nein |
+| US-Arbeitslosenquote | BLS `LNS14000000` (v2, Rückfall v1; optionaler API-Key) | nein |
+| US-Erstanträge (NSA) | DOL-Reihe über FRED `ICNSA` | nein |
+| US-Zinskurve 10 J. − 3 M. | US Treasury Daily Rates (CSV) | nein |
+
+Wirtschaftsdaten werden einmal täglich geladen, bei Fehlern nach 2 h neu versucht, der letzte gute Stand gilt 40 Tage.
+
+## Hinweise / Annahmen
+
+- Die Trade-Republic-API ist **inoffiziell** (Login-Ablauf wie `pytr`, Web-Login v2). Sie kann sich jederzeit
+  ändern. Der Säulenwächter **handelt nie selbst** – er liest nur und gibt Anweisungen.
+- Erstanträge kommen über FRED statt direkt über DOL `ar539` (gleiche DOL-Daten; `ar539.csv` war beim Test nicht
+  erreichbar).
+- Arbeitslosenquote: „Mittel der 12 Monate bis dahin“ ist inklusive des letzten Werts gerechnet.
+- Liegt ein Instrument in mehreren Säulen (z. B. XGLE als Anleihen-Säule **und** als Ausweichziel der Welt),
+  wird die Position nach den Soll-Beträgen aufgeteilt.
+- Keine Anlageberatung.
+
+## Entwicklung
+
+```bash
+python -m pytest tests            # reine Strategie-Logik (ohne HA)
+python -m pytest tests_ha         # Integrationstests in Home Assistant (pytest-homeassistant-custom-component)
+```

@@ -1,0 +1,8 @@
+refresh:
+apply_rebalance:
+send_test_message:
+  fields:
+    message:
+      example: "Hallo vom Säulenwächter"
+      selector:
+        text:

@@ -1,0 +1,13 @@
+{
+  "domain": "saeulenwaechter",
+  "name": "Säulenwächter",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "websocket_api", "panel_custom"],
+  "documentation": "https://github.com/",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/",
+  "requirements": [],
+  "version": "1.0.0"
+}

@@ -1,0 +1,89 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Säulenwächter einrichten",
+        "description": "Die 3-Säulen-Strategie (Welt 40 % · Gold 30 % · Anleihen 30 %). Alle Signale werden ohne Login berechnet. Mit Trade-Republic-Login sieht der Säulenwächter, was tatsächlich im Depot liegt, und sagt dir genau, was zu tun ist.",
+        "menu_options": {
+          "login": "Mit Trade Republic verbinden (einmalig)",
+          "paper": "Ohne Login – Papierdepot"
+        }
+      },
+      "login": {
+        "title": "Trade-Republic-Login",
+        "description": "Telefonnummer und 4-stellige PIN. Die PIN wird nicht gespeichert – nur die Web-Session. {error}",
+        "data": {
+          "phone": "Telefonnummer (+49…)",
+          "pin": "PIN"
+        }
+      },
+      "code": {
+        "title": "Bestätigungscode",
+        "description": "Gib den Code aus deiner Authenticator-App ein. {error}",
+        "data": {
+          "code": "Code"
+        }
+      },
+      "confirm": {
+        "title": "In der App bestätigen",
+        "description": "Trade Republic hat eine Login-Anfrage an dein Smartphone geschickt. Bestätige sie in der Trade-Republic-App und klicke dann auf „Absenden“. {error}"
+      },
+      "notify": {
+        "title": "WhatsApp & Betrag",
+        "description": "WhatsApp-Meldungen über CallMeBot (Nummer im internationalen Format, z. B. 4917…, und den API-Key). Der Betrag ist die Summe der drei Säulen (40/30/30) – im Papiermodus das Startkapital.",
+        "data": {
+          "wa_phone": "WhatsApp-Nummer",
+          "wa_apikey": "CallMeBot API-Key",
+          "total": "Gesamtbetrag (€)"
+        }
+      }
+    },
+    "error": {
+      "login_failed": "Login fehlgeschlagen.",
+      "cannot_connect": "Trade Republic nicht erreichbar.",
+      "not_confirmed": "Noch nicht in der App bestätigt – bitte bestätigen und erneut absenden."
+    },
+    "abort": {
+      "already_configured": "Der Säulenwächter ist bereits eingerichtet.",
+      "reauth_successful": "Neu angemeldet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Säulenwächter-Optionen",
+        "data": {
+          "wa_phone": "WhatsApp-Nummer",
+          "wa_apikey": "CallMeBot API-Key",
+          "notify": "WhatsApp-Meldungen senden",
+          "monthly_report": "Monatsbericht auch ohne Änderung",
+          "switch_warning": "Vorwarnung, wenn ein Signal zum Monatsende kippen würde",
+          "total": "Gesamtbetrag (€) – eine Änderung setzt die Beträge auf 40/30/30",
+          "rebalance_month": "Monat für das jährliche Angleichen (1–12)",
+          "bls_key": "BLS-API-Key (optional)",
+          "use_depot": "Echtes Trade-Republic-Depot verwenden"
+        }
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Aktualisieren",
+      "description": "Lädt Kurse, Depot und Wirtschaftsdaten neu."
+    },
+    "apply_rebalance": {
+      "name": "Angleichung übernehmen",
+      "description": "Setzt die Beträge auf Soll-Anteil × Depotwert."
+    },
+    "send_test_message": {
+      "name": "WhatsApp-Testnachricht",
+      "description": "Sendet eine Testnachricht über CallMeBot.",
+      "fields": {
+        "message": {
+          "name": "Nachricht",
+          "description": "Optionaler Text."
+        }
+      }
+    }
+  }
+}
