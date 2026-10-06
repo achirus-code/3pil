@@ -209,6 +209,15 @@ async def test_depot_actions_recognition_and_expired_login(make_engine, sent, ma
     assert {h["isin"] for h in d["pillars"]["welt"]["held"]} == {"IE000VAHT5T0", "US0378331005"}
 
     # Login abgelaufen: genau eine Meldung, keine Handlungsanweisung
+    # seit wann gehalten: ab dem ersten Abgleich, von Hand korrigierbar
+    held = {h["isin"]: h for h in eng2.data["pillars"]["welt"]["held"]}
+    assert held["IE000VAHT5T0"]["since"] == "2026-10-06" and not held["IE000VAHT5T0"]["since_manual"]
+    await eng2.set_held_since("IE000VAHT5T0", "2024-03-15")
+    held = {h["isin"]: h for h in eng2.data["pillars"]["welt"]["held"]}
+    assert held["IE000VAHT5T0"]["since"] == "2024-03-15" and held["IE000VAHT5T0"]["since_manual"]
+    with pytest.raises(ValueError):
+        await eng2.set_held_since("IE000VAHT5T0", "2030-01-01")
+
     # ohne Session: es gilt der gespeicherte Stand, mit aktuellen Kursen
     d = await eng2.refresh()
     assert d["mode"] == "depot" and d["depot"]["synced_at"] and d["depot"]["error"] is None
@@ -500,3 +509,24 @@ async def test_cash_rate_falls_back_to_ecb_deposit_rate(make_engine):
     d = await eng.refresh()
     z = d["stats"]["interest"]
     assert z["source"] == "ezb" and z["rate"] == pytest.approx(0.02) and z["at"] == "2026-10-05"
+
+
+async def test_ha_service_notification(aiohttp_client):
+    """Meldungen über einen Dienst in Home Assistant (z. B. ha-whatsapp)."""
+    from sw.notify import send_ha_service
+    calls = []
+
+    async def service(request):
+        calls.append((request.match_info["domain"], request.match_info["name"],
+                      request.headers.get("Authorization"), await request.json()))
+        return web.json_response([])
+
+    app = web.Application()
+    app.router.add_post("/core/api/services/{domain}/{name}", service)
+    client = await aiohttp_client(app)
+    url = str(client.make_url("/core/api"))
+    assert await send_ha_service(client.session, "whatsapp.send_message", "+49 171 1234567", "Hallo", "t", url)
+    assert calls[-1] == ("whatsapp", "send_message", "Bearer t", {"message": "Hallo", "target": "491711234567"})
+    assert await send_ha_service(client.session, "notify.mobile_app_handy", None, "Hallo", "t", url)
+    assert calls[-1][3] == {"message": "Hallo", "title": "Säulenwächter"}
+    assert not await send_ha_service(client.session, "kaputt", None, "x", "t", url)

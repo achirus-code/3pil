@@ -85,6 +85,7 @@ const STYLE = `
   .interest { margin-top:10px; padding:8px 10px; border-radius:8px; background:var(--secondary-background-color, rgba(127,127,127,.12)); font-size:13px; }
   .interest .muted { opacity:.7; }
   .muted { color:var(--secondary-text-color); font-weight:normal; }
+  .since-edit { font-size:11px; color:var(--primary-color); }
   .alarm-table { width:100%; margin-top:8px; border-collapse:collapse; font-size:14px; }
   .alarm-table th { text-align:left; font-size:11px; text-transform:uppercase; opacity:.85; padding:4px 6px; }
   .alarm-row { overflow-x:auto; }
@@ -129,6 +130,23 @@ const STYLE = `
          padding-left:8px; margin:6px 0; }
 `;
 
+// Haltedauer: „seit 3 Tagen / 2 Wochen / 5 Monaten / 1 Jahr 2 M.“ – ohne „seit“: „3 Tage / 2 Wochen …“
+function heldFor(iso, withSeit = true) {
+  if (!iso) return "–";
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  const n = (v, one, many, manyDat) => `${v} ${v === 1 ? one : withSeit ? manyDat : many}`;
+  let txt;
+  if (days < 1) return withSeit ? "seit heute" : "heute";
+  if (days < 7) txt = n(days, "Tag", "Tage", "Tagen");
+  else if (days < 31) txt = n(Math.floor(days / 7), "Woche", "Wochen", "Wochen");
+  else {
+    const months = Math.floor(days / 30.44);
+    if (months < 12) txt = n(months, "Monat", "Monate", "Monaten");
+    else txt = n(Math.floor(months / 12), "Jahr", "Jahre", "Jahren") + (months % 12 ? ` ${months % 12} M.` : "");
+  }
+  return withSeit ? `seit ${txt}` : txt;
+}
+
 class SaeulenBase extends HTMLElement {
   constructor() {
     super();
@@ -169,9 +187,9 @@ class SaeulenBase extends HTMLElement {
     this._render();
   }
 
-  async _action(action) {
+  async _action(action, extra = {}) {
     try {
-      await this._hass.callWS({ type: "saeulenwaechter/action", action });
+      await this._hass.callWS({ type: "saeulenwaechter/action", action, ...extra });
       setTimeout(() => this._load(), 1500);
     } catch (e) {
       alert(e.message || e);
@@ -218,6 +236,7 @@ class SaeulenBase extends HTMLElement {
         <div class="kv"><div class="k">Investiert</div><div class="v">${eur(h.cost, 0)}</div></div>
         <div class="kv"><div class="k">Wert (Geldkurs)</div><div class="v">${eur(h.value, 0)}</div></div>
         <div class="kv"><div class="k">Ergebnis</div><div class="v" style="color:${res == null || Math.abs(res) < 0.0005 ? "inherit" : res > 0 ? "var(--sw-green)" : "var(--sw-red)"}">${pct(res)}</div></div>
+        <div class="kv"><div class="k">Gehalten</div><div class="v">${heldFor(h.since)}${h.since ? `<div class="s" style="font-size:11px;color:var(--secondary-text-color)">${h.since_manual || h.physical || !h.isin || h.isin === "PHYSISCH" ? "gekauft" : "erster Abgleich"} ${new Date(h.since).toLocaleDateString("de-DE")}</div>` : ""}${!h.physical && h.isin && h.isin !== "PHYSISCH" && h.since !== undefined && h.counts_as !== undefined ? `<a href="#" class="since-edit" data-since="${esc(h.isin)}" data-date="${esc(h.since || "")}">ändern</a>` : ""}</div></div>
         ${h.share && h.share < 1 ? `<div class="kv"><div class="k">Anteil am Bestand</div><div class="v">${pct(h.share, 0, false)}</div></div>` : ""}
       </div>`;
     }).join("")}</div>`;
@@ -302,20 +321,42 @@ class SaeulenBase extends HTMLElement {
     const color = (v) => v == null || Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
     const signed = (v) => v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
     const t = st.total;
+    // Gewinn heute: Tagesänderung je Position (physisches Gold mit der Änderung des Goldpreises)
+    const today = {};
+    let todayTotal = null;
+    for (const p of Object.values(d.pillars || {})) {
+      for (const h of p.held || []) {
+        const c = h.physical ? p.change_24h : h.change_24h;
+        if (c == null || h.value == null) continue;
+        const v = h.value - h.value / (1 + c);
+        today[p.key] = (today[p.key] || 0) + v;
+        todayTotal = (todayTotal || 0) + v;
+      }
+    }
+    // Seit wann: die älteste gehaltene Position der Säule
+    const since = {};
+    for (const p of Object.values(d.pillars || {})) {
+      const ds = (p.held || []).map((h) => h.since).filter(Boolean).sort();
+      if (ds.length) since[p.key] = ds[0];
+    }
+    const todayPct = todayTotal != null && t.value ? todayTotal / (t.value - todayTotal) : null;
     const row = (r) => `<tr>
         <td>${esc(r.name)}${r.invested === false && r.value ? ` <span class="muted">· in Cash</span>` : ""}</td>
         <td class="num">${eur(r.value, 0)}</td>
         <td class="num">${r.cost != null ? eur(r.cost, 0) : (r.invested === false ? "Cash" : "–")}</td>
         <td class="num" style="color:${color(r.pnl)}">${signed(r.pnl)}</td>
-        <td class="num" style="color:${color(r.pnl)}">${r.pnl_pct != null ? pct(r.pnl_pct) : ""}</td></tr>`;
+        <td class="num" style="color:${color(r.pnl)}">${r.pnl_pct != null ? pct(r.pnl_pct) : ""}</td>
+        <td class="num" style="color:${color(today[r.key])}">${today[r.key] != null ? signed(today[r.key]) : "–"}</td>
+        <td class="num muted">${since[r.key] ? heldFor(since[r.key], false) : "–"}</td></tr>`;
     return `<div class="section">
       <div class="label">Säulenstatistik · ${d.mode === "paper" ? "Papierdepot" : "Depot"}</div>
       <div class="stat-top num">
         <div><div class="k">Gesamtwert</div><div class="big">${eur(t.value, 0)}</div></div>
         <div><div class="k">Einstand</div><div class="mid">${t.cost != null ? eur(t.cost, 0) : "–"}</div></div>
         <div><div class="k">Gewinn / Verlust</div><div class="mid" style="color:${color(t.pnl)}">${signed(t.pnl)}${t.pnl_pct != null ? ` · ${pct(t.pnl_pct)}` : ""}</div></div>
+        <div><div class="k">Heute</div><div class="mid" style="color:${color(todayTotal)}">${signed(todayTotal)}${todayPct != null ? ` · ${pct(todayPct)}` : ""}</div></div>
       </div>
-      <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th></tr>
+      <table class="stats"><tr><th>Säule</th><th>Wert</th><th>Einstand</th><th colspan="2">Ergebnis</th><th>Heute</th><th>Gehalten</th></tr>
         ${st.rows.map(row).join("")}</table>
       ${this.interestLine(st.interest)}
       ${this.reconcileLine(d.reconcile)}
@@ -420,6 +461,16 @@ Soll eine Position mitzählen: ISIN in den Optionen unter „Weitere ISINs …�
   bind() {
     this.shadowRoot.querySelectorAll("[data-action]").forEach((b) =>
       b.addEventListener("click", (e) => { e.stopPropagation(); this._action(b.dataset.action); }));
+    this.shadowRoot.querySelectorAll("[data-since]").forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const v = prompt(`Gekauft am (TT.MM.JJJJ) – leer lassen setzt auf den ersten Abgleich zurück:`, b.dataset.date ? new Date(b.dataset.date).toLocaleDateString("de-DE") : "");
+        if (v === null) return;
+        const m = v.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+        if (v.trim() && !m) { alert("Bitte als TT.MM.JJJJ eingeben."); return; }
+        const iso = m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : null;
+        this._action("since", { isin: b.dataset.since, date: iso });
+      }));
   }
 }
 

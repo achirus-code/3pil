@@ -143,7 +143,7 @@
     states: {},
     callWS: async (msg) => {
       if (msg.type === "saeulenwaechter/data") return api("api/data");
-      if (msg.type === "saeulenwaechter/action") { const r = await api("api/action", { action: msg.action }); status(); return r; }
+      if (msg.type === "saeulenwaechter/action") { const { type, ...body } = msg; const r = await api("api/action", body); status(); return r; }
       throw new Error("unbekannt: " + msg.type);
     },
   };

@@ -21,6 +21,8 @@ from .const import (
     CONF_BLS_KEY,
     CONF_CASH_RATE,
     CONF_CASH_RESERVE,
+    CONF_HA_SERVICE,
+    CONF_HA_TARGET,
     CONF_EXTRA_ISINS,
     CONF_MONTHLY_REPORT,
     CONF_NOTIFY,
@@ -52,7 +54,7 @@ from .const import (
     TZ,
 )
 from .macro import FETCHERS
-from .notify import send_whatsapp
+from .notify import send_ha_service, send_whatsapp
 from .tr_api import TRAuthError, TRError, TradeRepublic
 
 _LOGGER = logging.getLogger(__name__)
@@ -478,6 +480,15 @@ class Engine:
     async def _sync_depot(self) -> None:
         """Einmal lesen: Positionen, Cash und Zinssatz; der Stand wird gespeichert."""
         p = await self.tr.portfolio()
+        # Seit wann eine Position gehalten wird: Trade Republic liefert kein Kaufdatum – gezählt wird ab dem ersten
+        # Abgleich, an dem sie im Depot war (in der Oberfläche korrigierbar). Verkaufte Positionen fallen heraus.
+        since = self.state.setdefault("held_since", {})
+        today = self.now().date().isoformat()
+        for isin in list(since):
+            if isin not in p["positions"]:
+                del since[isin]
+        for isin in p["positions"]:
+            since.setdefault(isin, {"date": today, "manual": False})
         self.state["depot_snapshot"] = {"positions": p["positions"], "cash": p.get("cash"),
                                         "synced_at": self.now().isoformat()}
         self.state["sent"].pop("auth", None)
@@ -885,6 +896,8 @@ class Engine:
                     "cost": size * pos["avg_buy"] if pos.get("avg_buy") else None,
                     "bid": bid,
                     "value": size * bid if bid else None,
+                    "since": (self.state.get("held_since", {}).get(isin) or {}).get("date"),
+                    "since_manual": (self.state.get("held_since", {}).get(isin) or {}).get("manual", False),
                     "change_24h": (quote["last"] / quote["pre"] - 1
                                    if (quote := self._price(isin)).get("last") and quote.get("pre") else None),
                 })
@@ -924,6 +937,8 @@ class Engine:
                 "bid": bid,
                 "value": paper["qty"] * bid if bid else None,
                 "since": paper.get("since"),
+                "change_24h": (q["last"] / q["pre"] - 1
+                               if (q := self._price(paper["isin"])).get("last") and q.get("pre") else None),
             }]
         return out
 
@@ -1143,15 +1158,36 @@ class Engine:
         if not (force or opts.get(CONF_NOTIFY, True)):
             return False
         phone, apikey = opts.get(CONF_WA_PHONE), opts.get(CONF_WA_APIKEY)
-        if not phone or not apikey:
-            _LOGGER.info("WhatsApp nicht eingerichtet – Nachricht verworfen:\n%s", body)
+        service = (opts.get(CONF_HA_SERVICE) or "").strip()
+        if not (phone and apikey) and not service:
+            _LOGGER.info("Keine Benachrichtigung eingerichtet – Nachricht verworfen:\n%s", body)
             return False
         text = body if body.startswith("🏛️") else f"🏛️ *{NAME}*\n\n{body}"
         self.state.setdefault("log", []).append({"time": self.now().isoformat(), "text": text})
         self.state["log"] = self.state["log"][-30:]
-        return await send_whatsapp(self._http, phone, apikey, text)
+        results = []
+        if service:  # z. B. WhatsApp über ha-whatsapp, die Home-Assistant-App oder Telegram
+            results.append(await send_ha_service(self._http, service, opts.get(CONF_HA_TARGET), text))
+        if phone and apikey:
+            results.append(await send_whatsapp(self._http, phone, apikey, text))
+        return any(results)
 
     # ------------------------------------------------------------ Aktionen
+
+    async def set_held_since(self, isin: str, day: str | None) -> None:
+        """Kaufdatum einer Depotposition von Hand setzen (Trade Republic liefert keins)."""
+        since = self.state.setdefault("held_since", {})
+        if isin not in ((self.snapshot or {}).get("positions") or {}):
+            raise ValueError("Position nicht im Depot")
+        if day:
+            parsed = date.fromisoformat(day)
+            if parsed > self.now().date():
+                raise ValueError("Datum liegt in der Zukunft")
+            since[isin] = {"date": parsed.isoformat(), "manual": True}
+        else:
+            since.pop(isin, None)
+        await self.async_save()
+        await self.refresh()
 
     async def apply_rebalance(self) -> None:
         """Papierdepot: teilt das Papierkapital neu auf (Soll % · Σ Werte).
