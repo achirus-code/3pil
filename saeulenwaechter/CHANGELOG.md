@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1
+
+- Echtes Depot: Säulen ohne Position zählen mit ihrem Anteil am Cash bei Trade Republic statt mit dem konfigurierten Betrag. Gesamtwert und Angleichen waren dadurch zu hoch bzw. falsch.
+- Angleichen wird als Tabelle angezeigt: Ist, Ziel, Anteil und was zu kaufen oder zu verkaufen ist.
+
 ## 2.1.0
 
 - **Login per QR-Code:** in der Oberfläche den QR-Code mit der Handy-Kamera oder der Trade-Republic-App scannen und

@@ -80,6 +80,11 @@ const STYLE = `
   .alarm-tag { display:inline-block; font-size:11px; font-weight:800; text-transform:uppercase; background:#fff;
                color:#d70015; padding:2px 8px; border-radius:10px; }
   .alarm-text { margin-top:6px; font-size:15px; font-weight:700; line-height:1.35; }
+  .alarm-table { width:100%; margin-top:8px; border-collapse:collapse; font-size:14px; }
+  .alarm-table th { text-align:left; font-size:11px; text-transform:uppercase; opacity:.85; padding:4px 6px; }
+  .alarm-table td { padding:6px; border-top:1px solid rgba(255,255,255,.25); white-space:nowrap; }
+  .alarm-table .num { text-align:right; }
+  .alarm-table .mv { font-weight:800; }
   .alarm-foot { margin-top:10px; font-size:12px; opacity:.9; }
   @keyframes sw-pulse { 0% { box-shadow:0 0 0 0 rgba(255,59,48,.7); } 70% { box-shadow:0 0 0 14px rgba(255,59,48,0); }
                         100% { box-shadow:0 0 0 0 rgba(255,59,48,0); } }
@@ -268,9 +273,21 @@ class SaeulenBase extends HTMLElement {
       <div class="alarm-head"><ha-icon icon="mdi:alert-octagon"></ha-icon>
         <span>${todo.length === 1 ? "Handlung nötig" : `${todo.length} Handlungen nötig`} – Depot weicht von der Strategie ab</span></div>
       ${todo.map((t) => `<div class="alarm-row"><span class="alarm-tag">${esc(t.name)} · ${esc(t.action_label)}</span>
-        <div class="alarm-text">${esc(t.text)}</div></div>`).join("")}
+        ${t.rows ? this.rebalanceTable(t.rows) : `<div class="alarm-text">${esc(t.text)}</div>`}</div>`).join("")}
       <div class="alarm-foot">Bitte bei Trade Republic umsetzen – die Meldung verschwindet, sobald das Depot zum Ziel passt.</div>
     </div>`;
+  }
+
+  rebalanceTable(rows) {
+    const pc = (v) => `${(v * 100).toLocaleString("de-DE", { maximumFractionDigits: 1 })} %`;
+    const move = (r) => Math.abs(r.delta) < 1 ? "passt"
+      : `${r.delta > 0 ? (r.cash ? "Cash +" : "kaufen ") : "verkaufen "}${eur(Math.abs(r.delta), 0)}`;
+    return `<table class="alarm-table">
+      <tr><th>Säule</th><th class="num">Ist</th><th class="num">Ziel</th><th class="num">Anteil</th><th>Umsetzen</th></tr>
+      ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${eur(r.value, 0)}</td>
+        <td class="num">${eur(r.target_value, 0)}</td><td class="num">${pc(r.ist)} → ${pc(r.soll)}</td>
+        <td class="mv">${move(r)}</td></tr>`).join("")}
+    </table>`;
   }
 
   stats(d) {

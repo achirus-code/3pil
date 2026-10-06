@@ -550,11 +550,18 @@ class Engine:
         # 4) Werte, Aktion, Status
         values: dict[str, float] = {}
         out_pillars: dict[str, dict] = {}
+        # Echtes Depot: Säulen ohne Position halten ihren Anteil am Cash bei Trade Republic –
+        # nicht den konfigurierten Betrag, der im Depot gar nicht existiert.
+        empty = [k for k in pillars if not holdings.get(k)]
+        empty_soll = sum(amounts[k] for k in empty) or 1
+        depot_cash = depot.get("cash") or 0.0
         for key, p in pillars.items():
             cfg, res, st = p["cfg"], p["res"], p["st"]
             held = holdings.get(key, [])
             if held and all(h.get("value") is not None for h in held):
                 value = sum(h["value"] for h in held)
+            elif mode == "depot":
+                value = depot_cash * amounts[key] / empty_soll if not held else 0.0
             else:
                 value = st.get("proceeds") or amounts[key]
             values[key] = value
@@ -641,10 +648,16 @@ class Engine:
         todo = [{"key": k, "name": p["name"], "action": p["action"], "action_label": p["action_label"],
                  "text": p["instruction"]} for k, p in out_pillars.items() if p.get("instruction")]
         if overview["due"] and not todo:
-            todo.append({"key": "rebalance", "name": "Angleichen", "action": "rebalance", "action_label": "angleichen",
+            todo.append({"key": "rebalance", "name": "Depot", "action": "rebalance", "action_label": "angleichen",
                          "text": "ANGLEICHEN: " + " · ".join(
                              f"{out_pillars[r['key']]['name']} {S.fmt_eur(r['value'], 0)} → {S.fmt_eur(r['target_value'], 0)}"
-                             for r in overview["rows"] if abs(r["diff_pp"]) >= 0.5)})
+                             for r in overview["rows"] if abs(r["diff_pp"]) >= 0.5),
+                         "rows": [{"key": r["key"], "name": out_pillars[r["key"]]["name"],
+                                   "value": round(r["value"], 2), "target_value": round(r["target_value"], 2),
+                                   "delta": round(r["target_value"] - r["value"], 2),
+                                   "ist": r["ist"], "soll": r["soll"],
+                                   "cash": out_pillars[r["key"]]["state"] == STATE_CASH}
+                                  for r in overview["rows"]]})
         stats = S.pillar_stats([{"key": k, "name": p["name"], "value": p["value"], "held": p["held"]}
                                 for k, p in out_pillars.items()])
         return {

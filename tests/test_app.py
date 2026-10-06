@@ -333,6 +333,21 @@ async def test_physical_gold_in_depot_instructions(make_engine, market, monkeypa
     assert eng.data["pillars"]["gold"]["action"] == "hold"
 
 
+async def test_depot_empty_pillars_use_tr_cash(make_engine, monkeypatch):
+    # Säulen ohne Position zählen mit ihrem Anteil am echten Cash, nicht mit dem konfigurierten Betrag
+    async def portfolio(self):
+        return {"positions": {"IE00B3YLTY66": {"size": 3350.0, "avg_buy": 11.0}}, "cash": 6000.0}
+
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    eng = await make_engine()
+    eng.tr.cookies = {"tr_session": "s"}
+    await eng.refresh()
+    p = eng.data["pillars"]
+    assert p["gold"]["value"] == pytest.approx(3000.0)
+    assert p["anleihen"]["value"] == pytest.approx(3000.0)
+    assert eng.data["stats"]["total"]["value"] == pytest.approx(p["welt"]["value"] + 6000.0)
+
+
 async def test_web_gold_api(make_engine, aiohttp_client):
     eng = await make_engine()
     client = await aiohttp_client(make_app(eng, allowed=()))
