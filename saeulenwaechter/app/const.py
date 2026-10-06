@@ -5,7 +5,7 @@ from __future__ import annotations
 DOMAIN = "saeulenwaechter"
 ENTITY_PREFIX = "saeulenwaechter"
 NAME = "Säulenwächter"
-VERSION = "2.7.0"
+VERSION = "2.8.0"
 
 # Config-Entry-Daten
 CONF_USE_DEPOT = "use_depot"
@@ -13,8 +13,7 @@ CONF_USE_DEPOT = "use_depot"
 # Optionen
 CONF_TOTAL = "total"
 CONF_AMOUNTS = "amounts"
-CONF_WA_PHONE = "wa_phone"
-CONF_WA_APIKEY = "wa_apikey"
+CONF_WA_PHONE = "wa_phone"  # früher CallMeBot – dient noch als Empfänger, falls ha_target leer ist
 CONF_NOTIFY = "notify"
 CONF_MONTHLY_REPORT = "monthly_report"
 CONF_SWITCH_WARNING = "switch_warning"

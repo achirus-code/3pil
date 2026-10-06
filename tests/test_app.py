@@ -21,7 +21,7 @@ from sw.web import make_app
 
 FIXTURE = json.loads((Path(__file__).parent / "fixture_live.json").read_text())
 BERLIN = ZoneInfo("Europe/Berlin")
-OPTIONS = {"total": 100000, "wa_phone": "4917000000", "wa_apikey": "test", "notify": True,
+OPTIONS = {"total": 100000, "ha_service": "whatsapp.send_message", "ha_target": "+4917000000", "notify": True,
            "monthly_report": True, "switch_warning": True, "rebalance_month": 1, "use_depot": True}
 
 
@@ -61,11 +61,11 @@ def market(monkeypatch):
 
 @pytest.fixture
 async def make_engine(tmp_path, market, sent, monkeypatch):
-    async def send(session, phone, apikey, text):
+    async def send(session, service, target, text):
         sent.append(text)
         return True
 
-    monkeypatch.setattr(engine_mod, "send_whatsapp", send)
+    monkeypatch.setattr(engine_mod, "send_ha_service", send)
 
     async def tr_logout(self):
         self.cookies = {}
@@ -526,7 +526,7 @@ async def test_ha_service_notification(aiohttp_client):
     client = await aiohttp_client(app)
     url = str(client.make_url("/core/api"))
     assert await send_ha_service(client.session, "whatsapp.send_message", "+49 171 1234567", "Hallo", "t", url)
-    assert calls[-1] == ("whatsapp", "send_message", "Bearer t", {"message": "Hallo", "target": "491711234567"})
+    assert calls[-1] == ("whatsapp", "send_message", "Bearer t", {"message": "Hallo", "target": "+491711234567"})
     assert await send_ha_service(client.session, "notify.mobile_app_handy", None, "Hallo", "t", url)
     assert calls[-1][3] == {"message": "Hallo", "title": "Säulenwächter"}
     assert not await send_ha_service(client.session, "kaputt", None, "x", "t", url)
@@ -544,3 +544,12 @@ async def test_performance_periods_and_series(make_engine, market):
     assert set(one["pillars"]) <= {"welt", "gold", "anleihen"} and "welt" in one["pillars"]
     assert perf["series"][-1] == ["2026-10-06", pytest.approx(d["stats"]["total"]["value"], abs=1)]
     assert perf["series"][0][0] >= "2025-10-05" and welt["value"] > 0
+
+
+def test_normalize_target():
+    from sw.notify import normalize_target
+    assert normalize_target("0171 123-4567") == "+491711234567"
+    assert normalize_target("0049 171 1234567") == "+491711234567"
+    assert normalize_target("491711234567") == "+491711234567"
+    assert normalize_target("120363000000000000@g.us") == "120363000000000000@g.us"
+    assert normalize_target("") is None
