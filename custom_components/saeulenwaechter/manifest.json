@@ -1,13 +1,20 @@
 {
   "domain": "saeulenwaechter",
   "name": "Säulenwächter",
-  "codeowners": [],
+  "codeowners": [
+    "@achirus-code"
+  ],
   "config_flow": true,
-  "dependencies": ["frontend", "http", "websocket_api", "panel_custom"],
-  "documentation": "https://github.com/",
+  "dependencies": [
+    "frontend",
+    "http",
+    "websocket_api",
+    "panel_custom"
+  ],
+  "documentation": "https://github.com/achirus-code/3pil",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/",
+  "issue_tracker": "https://github.com/achirus-code/3pil/issues",
   "requirements": [],
   "version": "1.0.0"
 }

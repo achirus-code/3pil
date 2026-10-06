@@ -10,8 +10,10 @@ Anweisung.
 
 ## Installation
 
-1. Ordner `custom_components/saeulenwaechter` nach `<HA-config>/custom_components/` kopieren
-   (oder dieses Repo als benutzerdefiniertes HACS-Repository hinzufügen).
+1. **HACS:** *HACS › ⋮ › Benutzerdefinierte Repositories* → `https://github.com/achirus-code/3pil`, Typ
+   „Integration“ → „Säulenwächter“ herunterladen.
+   **Manuell:** `saeulenwaechter.zip` aus dem [neuesten Release](https://github.com/achirus-code/3pil/releases/latest)
+   nach `<HA-config>/custom_components/saeulenwaechter/` entpacken.
 2. Home Assistant neu starten.
 3. *Einstellungen › Geräte & Dienste › Integration hinzufügen › Säulenwächter*.
    - **Mit Trade Republic verbinden (einmalig):** Telefonnummer + PIN, danach die Anmeldung in der TR-App
@@ -87,6 +89,12 @@ Wirtschaftsdaten werden einmal täglich geladen, bei Fehlern nach 2 h neu versuc
 - Keine Anlageberatung.
 
 ## Entwicklung
+
+```bash
+./scripts/build.sh                # baut dist/saeulenwaechter.zip
+```
+
+Ein neues Release (`gh release create vX.Y.Z`) baut das ZIP per GitHub Action automatisch und hängt es an.
 
 ```bash
 python -m pytest tests            # reine Strategie-Logik (ohne HA)
