@@ -5,7 +5,6 @@
 - Zinsen auf Cash: Der Zinssatz von Trade Republic wird bei jedem Abgleich gelesen (oder als eigener Wert in den Optionen gesetzt). Die Statistik zeigt Satz, Cash und Zinsen im Jahr, neuer Sensor `sensor.saeulenwaechter_zins`.
 - Papierdepot: Säulen in Cash bekommen die Zinsen täglich gutgeschrieben.
 - Depot wird wie in der TR-Web-App über `compactPortfolioByTypeV2` gelesen; Kaufkurse als Betrag-Objekt werden erkannt. Die Kaufkurse stehen im Log zum Abgleich.
-
 - Echtes Depot: Säulen ohne Position zählen mit ihrem Anteil am Cash bei Trade Republic statt mit dem konfigurierten Betrag. Gesamtwert und Angleichen waren dadurch zu hoch bzw. falsch.
 - Angleichen wird als Tabelle angezeigt: Ist, Ziel, Anteil und was zu kaufen oder zu verkaufen ist.
 
