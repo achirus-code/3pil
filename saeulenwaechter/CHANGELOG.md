@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.2
+
+- Positionstabelle in der Wertentwicklung sortierbar (Position, Wert, Im Zeitraum, Seit Kauf – Klick auf die Überschrift, erneut für umgekehrt).
+- Prozentwerte in Klammern: Anteil am Depot beim Wert, Rendite im Zeitraum und seit Kauf.
+
 ## 2.12.1
 
 - Steuern netto: Die beim Verkauf einbehaltene Steuer (Zeile „Steuer“ in den Transaktionsdetails) zählt jetzt als Steuer, Erstattungen und Korrekturen werden gegengerechnet. Vorher enthielt „Steuern“ nur Erstattungen – der Haken „Steuern einrechnen“ erhöhte deshalb den Gewinn. Kursgewinne werden vor Steuern ausgewiesen.

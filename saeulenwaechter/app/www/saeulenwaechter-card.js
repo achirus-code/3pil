@@ -102,6 +102,9 @@ const STYLE = `
   .alltime .parts b.num { font-size:inherit; }
   .pos-table { margin-top:10px; }
   .pos-table td { vertical-align:top; }
+  .pos-table th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+  .pos-table th.sortable:hover { color:var(--primary-text-color); }
+  .pos-table .small { font-size:11px; }
   .pos-table i.sq { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; }
   details.trades { font-size:12px; }
   details.trades summary { cursor:pointer; color:var(--primary-color); }
@@ -543,9 +546,6 @@ class SaeulenBase extends HTMLElement {
   }
 
   positionsTable(perf, cur, d) {
-    const list = (perf.positions || []).filter((p) => !p.sold || Math.abs((cur.positions || {})[p.isin] || 0) >= 1)
-      .sort((a, b) => b.value - a.value);
-    if (!list.length) return "";
     const held = {};
     for (const p of Object.values(d.pillars)) for (const h of p.held || []) {
       const id = h.physical ? `${h.isin}:${h.name}` : h.isin;
@@ -557,18 +557,31 @@ class SaeulenBase extends HTMLElement {
     const colors = { other: "#8e8e93", ...Object.fromEntries(Object.values(d.pillars).map((p) => [p.key, p.color])) };
     const signed = (v) => v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
     const col = (v) => v == null || Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
-    return `<table class="stats pos-table"><tr><th>Position</th><th>Wert</th><th>Im Zeitraum</th><th>Seit Kauf</th><th></th></tr>
-      ${list.map((p) => {
-        const g = (cur.positions || {})[p.isin];
-        const h = held[p.isin] || {};
-        const total = h.cost ? h.value - h.cost : null;
-        return `<tr><td><i class="sq" style="background:${esc(colors[p.pillar] || "#888")}"></i>${esc(p.name)}<br><span class="muted">${esc(names[p.pillar] || "")}${p.sold ? " · verkauft" : ""}${p.first ? ` · seit ${new Date(p.first).toLocaleDateString("de-DE")}` : ""}</span></td>
-          <td class="num">${eur(p.value, 0)}</td>
-          <td class="num" style="color:${col(g)}">${signed(g)}</td>
-          <td class="num" style="color:${col(total)}">${signed(total)}</td>
-          <td class="num" style="color:${col(total)}">${total != null && h.cost ? pct(total / h.cost, 2) : ""}</td></tr>`;
-      }).join("")}</table>`;
+    const total = (perf.positions || []).reduce((a, p) => a + (p.value || 0), 0);
+    const rows = (perf.positions || []).filter((p) => !p.sold || Math.abs((cur.positions || {})[p.isin] || 0) >= 1).map((p) => {
+      const h = held[p.isin] || {};
+      const since = h.cost ? h.value - h.cost : null;
+      return { ...p, share: total ? p.value / total : null, period: (cur.positions || {})[p.isin] ?? null,
+               periodPct: (cur.positions_pct || {})[p.isin] ?? null, since, sincePct: since != null && h.cost ? since / h.cost : null };
+    });
+    const sort = this._posSort || { key: "value", dir: -1 };
+    const val = (r) => sort.key === "name" ? r.name.toLowerCase() : r[sort.key];
+    rows.sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (x < y ? -1 : x > y ? 1 : 0) * (sort.key === "name" ? -sort.dir : sort.dir);
+    });
+    const th = (key, label) => `<th class="sortable" data-sort="${key}">${label}${sort.key === key ? (sort.dir < 0 ? " ▼" : " ▲") : ""}</th>`;
+    const p2 = (v) => v == null ? "" : ` <span class="small">(${pct(v, 2)})</span>`;
+    return `<table class="stats pos-table"><tr>${th("name", "Position")}${th("value", "Wert")}${th("period", "Im Zeitraum")}${th("since", "Seit Kauf")}</tr>
+      ${rows.map((r) => `<tr><td><i class="sq" style="background:${esc(colors[r.pillar] || "#888")}"></i>${esc(r.name)}<br><span class="muted">${esc(names[r.pillar] || "")}${r.sold ? " · verkauft" : ""}${r.first ? ` · seit ${new Date(r.first).toLocaleDateString("de-DE")}` : ""}</span></td>
+          <td class="num">${eur(r.value, 0)}${r.share != null && !r.sold ? ` <span class="small muted">(${pct(r.share, 2, false)})</span>` : ""}</td>
+          <td class="num" style="color:${col(r.period)}">${signed(r.period)}${p2(r.periodPct)}</td>
+          <td class="num" style="color:${col(r.since)}">${signed(r.since)}${p2(r.sincePct)}</td></tr>`).join("")}</table>`;
   }
+
 
   // Gestapelte Flächen: je Säule in ihrer Farbe, Cash blau obendrauf
   _geom(rows, cash, W, H, L, R, T, B) {
@@ -770,6 +783,13 @@ Soll eine Position mitzählen: ISIN in den Optionen unter „Weitere ISINs …�
     this.shadowRoot.querySelectorAll("[data-period]").forEach((b) =>
       b.addEventListener("click", (e) => { e.stopPropagation(); this._period = b.dataset.period; this._render(); }));
     this._bindChart();
+    this.shadowRoot.querySelectorAll("[data-sort]").forEach((th) =>
+      th.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const cur = this._posSort || { key: "value", dir: -1 };
+        this._posSort = { key: th.dataset.sort, dir: cur.key === th.dataset.sort ? -cur.dir : -1 };
+        this._render();
+      }));
     this.shadowRoot.querySelectorAll("[data-inc]").forEach((cb) =>
       cb.addEventListener("change", () => {
         if (cb.dataset.inc === "interest") this._incInterest = cb.checked; else this._incTaxes = cb.checked;

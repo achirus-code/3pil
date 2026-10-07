@@ -1157,12 +1157,16 @@ class Engine:
                 continue
             invested = [sum(f[j] for f in flows[i0 + 1:]) for j in range(len(keys) + 1)]
             pillar_gain = {k: round(rows[n][2 + j] - rows[i0][2 + j] - invested[1 + j], 2) for j, k in enumerate(keys)}
-            positions = {}
+            positions, pos_base = {}, {}
             for li, ln in enumerate(lines):
-                inv = sum(-t["amount"] for t in ln["trades"] if rows[i0][0] < t["date"] <= rows[n][0])
+                in_period = [t for t in ln["trades"] if rows[i0][0] < t["date"] <= rows[n][0]]
+                inv = sum(-t["amount"] for t in in_period)
                 g = line_vals[n][li] - line_vals[i0][li] - inv
                 pid = f"{ln['isin']}:{ln['name']}" if ln["physical"] else ln["isin"]
                 positions[pid] = round(positions.get(pid, 0.0) + g, 2)
+                # Basis für % : Wert zu Beginn + im Zeitraum gekauft
+                pos_base[pid] = pos_base.get(pid, 0.0) + line_vals[i0][li] + sum(max(-t["amount"], 0) for t in in_period)
+            positions_pct = {k: round(v / pos_base[k], 6) if pos_base.get(k) else None for k, v in positions.items()}
             # Gewinn = Gewinn der Positionen (Wertänderung ohne Käufe/Verkäufe) + Erträge (Dividenden, Zinsen,
             # Steuern) laut Zeitleiste. Ein-/Auszahlungen ändern nur das Cash, nie den Gewinn.
             other = round(sum(income[i0 + 1:]), 2) if cash_events else None
@@ -1173,7 +1177,8 @@ class Engine:
                               "interest": round(sum(interest[i0 + 1:]), 2), "taxes": round(sum(taxes[i0 + 1:]), 2),
                               "deposits": round(ext, 2) if ext is not None else None,
                               "income": round(other, 2) if other is not None else None,
-                              "pct": gain / base if base else None, "pillars": pillar_gain, "positions": positions}
+                              "pct": gain / base if base else None, "pillars": pillar_gain, "positions": positions,
+                              "positions_pct": positions_pct}
         events = sorted(({"date": t["date"], "pillar": ln["key"], "isin": ln["isin"], "name": ln["name"],
                           "amount": round(-t["amount"], 2), "shares": round(t["shares"], 4)}
                          for ln in lines for t in ln["trades"] if t["date"] >= rows[0][0] and not ln["physical"]),
