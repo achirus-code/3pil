@@ -76,6 +76,11 @@ async def make_engine(tmp_path, market, sent, monkeypatch):
         return []
 
     monkeypatch.setattr(TradeRepublic, "transactions", no_trades)  # kein Netz in den Tests
+
+    async def no_yahoo(session, isin):
+        return None
+
+    monkeypatch.setattr(engine_mod, "yahoo_candles", no_yahoo)
     sessions = []
 
     async def factory(options=None, when="2026-10-06 10:00"):
@@ -546,7 +551,7 @@ async def test_performance_periods_and_series(make_engine, market):
     assert one["from"] <= "2026-09-06" and isinstance(one["gain"], float)
     assert perf["periods"]["YTD"]["from"] <= "2026-01-02"
     # jede Zeile: Tag, gesamt, je Säule – die Summe der Säulen ergibt den Gesamtwert
-    assert perf["keys"] == ["welt", "gold", "anleihen"]
+    assert perf["keys"] == ["welt", "gold"]  # nur Säulen mit Positionen
     last = perf["series"][-1]
     assert last[0] == "2026-10-06" and last[1] == pytest.approx(sum(last[2:]), abs=0.05)
     invested_positions = sum(h["value"] for p in d["pillars"].values() for h in p["held"])
@@ -594,3 +599,39 @@ async def test_performance_uses_trade_history(make_engine, market, monkeypatch):
     assert [e["amount"] for e in perf["events"]] == [600.0, 450.0]
     held = d["pillars"]["welt"]["held"][0]
     assert held["since"] == "2026-03-02" and held["since_manual"] == "trades"
+
+
+async def test_performance_real_depot_with_cash_events(make_engine, market, monkeypatch):
+    """Echter Depotwert: Cash je Tag aus allen Geldbewegungen, Einzahlungen zählen nicht als Gewinn."""
+    async def portfolio(self):
+        return {"positions": {"IE00B3YLTY66": {"size": 100.0, "avg_buy": 10.5}}, "cash": 500.0}
+
+    async def transactions(self, isins=None, max_pages=60):
+        self.last_cash_events = [
+            {"date": "2026-03-01", "amount": 1000.0, "isin": None, "kind": "external", "type": "PAYMENT_INBOUND"},
+            {"date": "2026-03-02", "amount": -600.0, "isin": "IE00B3YLTY66", "kind": "trade", "type": "ORDER"},
+            {"date": "2026-09-21", "amount": -450.0, "isin": "IE00B3YLTY66", "kind": "trade", "type": "ORDER"},
+            {"date": "2026-09-30", "amount": 5.0, "isin": None, "kind": "income", "type": "INTEREST"}]
+        return [{"id": "a", "isin": "IE00B3YLTY66", "time": "2026-03-02T10:00:00+00:00", "date": "2026-03-02",
+                 "amount": -600.0, "shares": 60.0, "subtitle": "Kauforder"},
+                {"id": "b", "isin": "IE00B3YLTY66", "time": "2026-09-21T10:00:00+00:00", "date": "2026-09-21",
+                 "amount": -450.0, "shares": 40.0, "subtitle": "Kauforder"}]
+
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    monkeypatch.setattr(TradeRepublic, "transactions", transactions)
+    eng = await make_engine()
+    eng.tr.cookies = {"tr_session": "s"}
+    d = await eng.refresh()
+    perf = d["performance"]
+    assert perf["exact_cash"] and perf["complete"]
+    rows, cash = perf["series"], perf["cash"]
+    before = max(i for i, r in enumerate(rows) if r[0] < "2026-03-01")
+    assert cash[before] == pytest.approx(500 - (1000 - 600 - 450 + 5))  # Cash vor der Einzahlung
+    assert cash[-1] == 500.0
+    one_year = perf["periods"]["1J"]
+    i0 = max(i for i, r in enumerate(rows) if r[0] <= one_year["from"])
+    total = lambda i: rows[i][1] + cash[i]  # noqa: E731
+    assert one_year["deposits"] == 1000.0
+    assert one_year["gain"] == pytest.approx(total(len(rows) - 1) - total(i0) - 1000.0, abs=0.05)
+    assert one_year["positions"]["IE00B3YLTY66"] == pytest.approx(one_year["pillars"]["welt"], abs=0.05)
+    assert one_year["income"] == pytest.approx(one_year["gain"] - one_year["pillars"]["welt"], abs=0.05)

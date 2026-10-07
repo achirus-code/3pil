@@ -55,6 +55,7 @@ from .const import (
 )
 from .macro import FETCHERS
 from .notify import send_ha_service
+from .prices import yahoo_candles
 from .tr_api import TRAuthError, TRError, TradeRepublic
 
 _LOGGER = logging.getLogger(__name__)
@@ -473,9 +474,9 @@ class Engine:
                 for isin, d in res.items():
                     m = self.state["market"].setdefault(isin, {})
                     m.update({k: v for k, v in d.items() if v})
-                # Tageskurse der Säulen-Produkte für die Entwicklung über 1 Monat / 6 Monate / 1 Jahr
+                # Tageskurse aller Depot-Positionen für den Verlauf (auch Einzelaktien außerhalb der Säulen)
                 now = self.now()
-                held = [i for i in extra if S.resolve_isin(i, PILLARS, self.extra_isins)]
+                held = extra
                 stale = [i for i in held if not self.state["market"].get(i, {}).get("candles")
                          or now - datetime.fromisoformat(self.state["market"][i].get("_candles_at", "2000-01-01T00:00:00+00:00"))
                          > timedelta(hours=CANDLE_REFRESH_H)]
@@ -487,7 +488,32 @@ class Engine:
                             m.update(candles=d["candles"], _candles_at=now.isoformat())
             except Exception:  # noqa: BLE001
                 pass
+        await self._yahoo_fallback(depot)
         return depot
+
+    async def _yahoo_fallback(self, depot: dict) -> None:
+        """Fehlen bei Trade Republic Tageskurse für eine Position oder beginnen sie erst nach dem ersten Kauf,
+        werden sie (einmal am Tag) von Yahoo Finance geholt."""
+        now = self.now()
+        first_trade = {}
+        for t in self.state.get("trades", []):
+            first_trade[t["isin"]] = min(first_trade.get(t["isin"], t["date"]), t["date"])
+        for isin in depot.get("positions") or {}:
+            m = self.state["market"].setdefault(isin, {})
+            candles = m.get("candles") or []
+            first = (datetime.fromtimestamp(candles[0]["time"] / 1000, timezone.utc).date().isoformat()
+                     if candles else None)
+            need = not candles or (isin in first_trade and first and first > first_trade[isin])
+            tried = m.get("_yahoo_at")
+            if not need or (tried and now - datetime.fromisoformat(tried) < timedelta(hours=24)):
+                continue
+            m["_yahoo_at"] = now.isoformat()
+            yc = await yahoo_candles(self._http, isin)
+            if yc:
+                # TR-Kurse haben Vorrang; Yahoo füllt nur die Zeit davor bzw. ersetzt fehlende
+                tr_start = candles[0]["time"] if candles else None
+                merged = [c for c in yc if tr_start is None or c["time"] < tr_start] + candles
+                m.update(candles=merged, _candles_src="yahoo" if not candles else "tr+yahoo")
 
     async def _sync_depot(self) -> None:
         """Einmal lesen: Positionen, Cash und Zinssatz; der Stand wird gespeichert."""
@@ -509,6 +535,7 @@ class Engine:
             # jedes Mal komplett neu (frühere Fehldeutungen, z. B. Dividenden, fallen so wieder heraus)
             self.state["trades"] = sorted(trades, key=lambda t: t["time"])
             self.state["timeline_diag"] = getattr(self.tr, "last_timeline", None)
+            self.state["cash_events"] = getattr(self.tr, "last_cash_events", None) or []
             self.state["trades_at"] = self.now().isoformat()
         except TRAuthError:
             raise
@@ -813,7 +840,8 @@ class Engine:
             "tr_split": split,
             "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
             "performance": self._performance(holdings, mode, today,
-                                             sum(values[k] for k in pillars if not holdings.get(k))),
+                                             sum(values[k] for k in pillars if not holdings.get(k)),
+                                             unassigned, depot.get("cash") if mode == "depot" else None),
             "tr_trades": [{k: t.get(k) for k in ("date", "isin", "subtitle", "shares", "amount")}
                        for t in self.state.get("trades", [])] if mode == "depot" else [],
             "market_error": market.get("_error"),
@@ -944,14 +972,17 @@ class Engine:
         y, m = divmod(today.year * 12 + today.month - 1 - months, 12)
         return date(y, m + 1, min(today.day, calendar.monthrange(y, m + 1)[1]))
 
-    def _performance(self, holdings: dict, mode: str, today: date, cash_now: float = 0.0) -> dict | None:
-        """Echter Verlauf der Wertpapiere über 1 Woche bis 5 Jahre (aus Tagesschlusskursen).
+    def _performance(self, holdings: dict, mode: str, today: date, cash_now: float = 0.0,
+                     unassigned: list[dict] | None = None, depot_cash: float | None = None) -> dict | None:
+        """Echter Depotverlauf über 1 Woche bis 5 Jahre aus Tagesschlusskursen (Trade Republic, sonst Yahoo).
 
-        Die Stückzahl je Tag wird vom heutigen Bestand aus rückwärts über die Käufe und Verkäufe gerechnet
-        (Zeitleiste von Trade Republic, Papierdepot, Kaufdatum des physischen Golds). Gewinn eines Zeitraums =
-        Wert am Ende − Wert am Anfang − in der Zeit investiertes Geld; Käufe zählen also nicht als Gewinn.
-        Cash ist nicht enthalten. Junge Produkte werden vor ihrem ersten Kurs mit dem gleichwertigen
-        Säulen-Instrument fortgeschrieben.
+        - Stückzahl je Tag: vom heutigen Bestand rückwärts über die Käufe/Verkäufe der Zeitleiste.
+        - Echtes Depot: alle Positionen (Säulen und „Sonstige“) plus Cash; Cash je Tag exakt aus allen
+          Geldbewegungen der Zeitleiste. Gewinn = Wertänderung − Ein-/Auszahlungen; Dividenden und Zinsen zählen
+          zum Gewinn, Käufe nicht.
+        - Ohne Geldbewegungen (Papierdepot, alte Daten): Cash vor Käufen zurückgerechnet, Gewinn der Positionen
+          = Wertänderung − investiertes Geld.
+        - Junge Produkte ohne eigene Kurse vor ihrem Start: mit dem gleichwertigen Säulen-Instrument fortgeschrieben.
         """
         def closes(isin: str) -> list[tuple[str, float]]:
             out = []
@@ -964,8 +995,14 @@ class Engine:
             return sorted(out)
 
         all_trades = self.state.get("trades", []) if mode == "depot" else []
-        lines = []  # dict: key, isin, name, size, series, trades
-        for key, hs in holdings.items():
+        cash_events = self.state.get("cash_events", []) if mode == "depot" else []
+        exact_cash = bool(cash_events) and depot_cash is not None
+        groups = dict(holdings)
+        if mode == "depot" and unassigned:
+            groups["other"] = [{"isin": u["isin"], "name": u["name"], "size": u.get("size"), "value": u.get("value"),
+                                "cost": None} for u in unassigned if u.get("value") is not None]
+        lines = []
+        for key, hs in groups.items():
             for h in hs:
                 series = closes(GOLD_ISIN if h.get("physical") else h["isin"])
                 ref = h.get("counts_as")
@@ -990,7 +1027,8 @@ class Engine:
                                "amount": t["amount"] * share if t.get("amount") is not None else None}
                               for t in all_trades if t["isin"] == h["isin"]]
                 lines.append({"key": key, "isin": h["isin"], "name": h["name"], "size": h["size"],
-                              "series": series, "trades": trades, "known": bool(trades)})
+                              "series": series, "trades": trades, "known": bool(trades),
+                              "physical": bool(h.get("physical"))})
         if not lines:
             return None
 
@@ -998,42 +1036,74 @@ class Engine:
             past = [c for d, c in series if d <= day]
             return past[-1] if past else (series[0][1] if series else None)
 
-        # fehlende Stückzahlen aus Betrag und Kurs des Tages schätzen
-        for ln in lines:
+        for ln in lines:  # fehlende Stückzahlen/Beträge ergänzen
             for t in ln["trades"]:
                 if t.get("shares") is None and t.get("amount"):
                     c = close_on(ln["series"], t["date"])
                     t["shares"] = -t["amount"] / c if c else 0.0
                 if t.get("amount") is None:
-                    c = close_on(ln["series"], t["date"]) or 0
-                    t["amount"] = -t["shares"] * c
-        start = max(ln["series"][0][0] for ln in lines)
+                    t["amount"] = -t["shares"] * (close_on(ln["series"], t["date"]) or 0)
+
+        # Zeitraum: ab dem Tag, ab dem jede Position, solange sie im Depot ist, einen Kurs hat. Eine Position, die
+        # erst später gekauft wurde, braucht vor ihrem ersten Kauf keinen Kurs.
+        def needs_from(ln: dict) -> str | None:
+            first_series = ln["series"][0][0]
+            held_before = not ln["trades"] or ln["size"] - sum(t["shares"] for t in ln["trades"]) > 1e-6
+            if held_before:
+                return first_series
+            first_trade = min(t["date"] for t in ln["trades"])
+            return first_series if first_series > first_trade else None
+        constraints = [c for c in (needs_from(ln) for ln in lines) if c]
+        start = max(constraints) if constraints else min(ln["series"][0][0] for ln in lines)
         days = sorted({d for ln in lines for d, _ in ln["series"] if d >= start})
         if not days:
             return None
-        keys = list(holdings)
-        rows, flows = [], []  # flows je Zeile: [gesamt, je Säule …] – an dem Tag investiert (+) / entnommen (−)
+        keys = list(dict.fromkeys(ln["key"] for ln in lines))
+        rows, flows, line_vals = [], [], []
         idx = [0] * len(lines)
         last = [None] * len(lines)
         for day in days:
             per = dict.fromkeys(keys, 0.0)
             inflow = dict.fromkeys(keys, 0.0)
+            lv = []
             for i, ln in enumerate(lines):
                 series = ln["series"]
                 while idx[i] < len(series) and series[idx[i]][0] <= day:
                     last[i] = series[idx[i]][1]
                     idx[i] += 1
-                later = sum(t["shares"] for t in ln["trades"] if t["date"] > day)
-                held = max(ln["size"] - later, 0.0)
-                per[ln["key"]] += held * last[i]
+                price = last[i] if last[i] is not None else series[0][1]
+                held = max(ln["size"] - sum(t["shares"] for t in ln["trades"] if t["date"] > day), 0.0)
+                v = held * price
+                lv.append(v)
+                per[ln["key"]] += v
                 inflow[ln["key"]] += sum(-t["amount"] for t in ln["trades"] if t["date"] == day)
             vals = [round(per[k], 2) for k in keys]
             rows.append([day, round(sum(vals), 2), *vals])
             flows.append([round(sum(inflow.values()), 2), *[round(inflow[k], 2) for k in keys]])
+            line_vals.append(lv)
         today_s = today.isoformat()
         if rows[-1][0] != today_s:
             rows.append([today_s, *rows[-1][1:]])
             flows.append([0.0] * (len(keys) + 1))
+            line_vals.append(list(line_vals[-1]))
+
+        # Cash je Tag und Ein-/Auszahlungen je Tag
+        external = [0.0] * len(rows)
+        if exact_cash:
+            ev = sorted(cash_events, key=lambda e: e["date"])
+            cash_series = []
+            for i, r in enumerate(rows):
+                after = sum(e["amount"] for e in ev if e["date"] > r[0])
+                cash_series.append(round(depot_cash - after, 2))
+                prev = rows[i - 1][0] if i else "0000"
+                external[i] = round(sum(e["amount"] for e in ev if e["kind"] == "external"
+                                        and prev < e["date"] <= r[0]) if i else 0.0, 2)
+        else:
+            cash_series = []
+            later_in = sum(f[0] for f in flows)
+            for f in flows:
+                later_in -= f[0]
+                cash_series.append(round(max(cash_now + later_in, 0.0), 2))
 
         def index_at(day: str) -> int | None:
             pos = None
@@ -1051,25 +1121,32 @@ class Engine:
                 periods[label] = None
                 continue
             invested = [sum(f[j] for f in flows[i0 + 1:]) for j in range(len(keys) + 1)]
-            gain = rows[n][1] - rows[i0][1] - invested[0]
-            base = rows[i0][1] + max(invested[0], 0)
+            pillar_gain = {k: round(rows[n][2 + j] - rows[i0][2 + j] - invested[1 + j], 2) for j, k in enumerate(keys)}
+            positions = {}
+            for li, ln in enumerate(lines):
+                inv = sum(-t["amount"] for t in ln["trades"] if rows[i0][0] < t["date"] <= rows[n][0])
+                g = line_vals[n][li] - line_vals[i0][li] - inv
+                pid = f"{ln['isin']}:{ln['name']}" if ln["physical"] else ln["isin"]
+                positions[pid] = round(positions.get(pid, 0.0) + g, 2)
+            if exact_cash:
+                ext = sum(external[i0 + 1:])
+                start_total = rows[i0][1] + cash_series[i0]
+                gain = rows[n][1] + cash_series[n] - start_total - ext
+                base = start_total + max(ext, 0)
+                other = gain - sum(pillar_gain.values())  # Zinsen, Dividenden, Gebühren, Steuern
+            else:
+                ext = None
+                gain = rows[n][1] - rows[i0][1] - invested[0]
+                base = rows[i0][1] + max(invested[0], 0)
+                other = None
             periods[label] = {"from": rows[i0][0], "gain": round(gain, 2), "invested": round(invested[0], 2),
-                              "pct": gain / base if base else None,
-                              "pillars": {k: round(rows[n][2 + j] - rows[i0][2 + j] - invested[1 + j], 2)
-                                          for j, k in enumerate(keys)}}
+                              "deposits": round(ext, 2) if ext is not None else None,
+                              "income": round(other, 2) if other is not None else None,
+                              "pct": gain / base if base else None, "pillars": pillar_gain, "positions": positions}
         events = sorted(({"date": t["date"], "pillar": ln["key"], "isin": ln["isin"], "name": ln["name"],
                           "amount": round(-t["amount"], 2), "shares": round(t["shares"], 4)}
-                         for ln in lines for t in ln["trades"] if t["date"] >= rows[0][0]),
+                         for ln in lines for t in ln["trades"] if t["date"] >= rows[0][0] and not ln["physical"]),
                         key=lambda e: e["date"])
-        # Cash je Tag: heutiges Cash plus das Geld, das später in Käufe floss (vorher lag es noch als Cash da),
-        # minus spätere Verkaufserlöse. Ein- und Auszahlungen kennt die App nicht – nie unter null.
-        cash_series = []
-        later = sum(f[0] for f in flows)
-        for i, f in enumerate(flows):
-            later -= f[0]
-            cash_series.append(round(max(cash_now + later, 0.0), 2))
-        # Prüfung: erklären die Käufe/Verkäufe den heutigen Bestand? Nicht erklärte Stücke werden so gerechnet,
-        # als lägen sie schon vor Beginn im Depot – dann ist der Verlauf für sie nur eine Annahme.
         coverage = []
         for ln in lines:
             explained = sum(t["shares"] for t in ln["trades"])
@@ -1078,9 +1155,14 @@ class Engine:
                              "explained": round(explained, 4), "missing": round(missing, 4),
                              "complete": abs(missing) <= max(0.01 * ln["size"], 1e-6),
                              "first": min((t["date"] for t in ln["trades"]), default=None)})
-        complete = all(c["complete"] for c in coverage)
-        return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events, "cash": cash_series,
-                "history": all(ln["known"] for ln in lines), "complete": complete, "coverage": coverage,
+        info = [{"isin": f"{ln['isin']}:{ln['name']}" if ln["physical"] else ln["isin"], "name": ln["name"], "pillar": ln["key"], "size": round(ln["size"], 4),
+                 "value": round(line_vals[-1][li], 2),
+                 "price_source": self.state["market"].get(ln["isin"], {}).get("_candles_src", "tr"),
+                 "first": min((t["date"] for t in ln["trades"]), default=None)} for li, ln in enumerate(lines)]
+        return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events,
+                "cash": cash_series, "external": external, "exact_cash": exact_cash, "positions": info,
+                "history": all(ln["known"] for ln in lines if not ln["physical"]),
+                "complete": all(c["complete"] for c in coverage), "coverage": coverage,
                 "diag": self.state.get("timeline_diag") if mode == "depot" else None,
                 "synced_trades_at": self.state.get("trades_at") if mode == "depot" else None}
 

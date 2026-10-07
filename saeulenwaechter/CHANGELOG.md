@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.11.0
+
+- Echter Depotwert in der Wertentwicklung: alle Positionen (Säulen und „Sonstige“, z. B. Einzelaktien) plus Cash. Cash je Tag exakt aus allen Geldbewegungen der Trade-Republic-Zeitleiste.
+- Gewinn = Wertänderung ohne Ein- und Auszahlungen; Dividenden, Zinsen, Gebühren und Steuern werden separat ausgewiesen.
+- Tabelle je Position: Wert, Gewinn im gewählten Zeitraum, Gewinn seit Kauf.
+- Tageskurse für alle Depot-Positionen von Trade Republic; fehlen sie oder beginnen sie zu spät, ergänzt die App sie von Yahoo Finance.
+
 ## 2.10.3
 
 - Stückzahlen wie „1.500“ (deutscher Tausenderpunkt) wurden als 1,5 gelesen – dadurch fehlten Stücke in der Historie. Behoben.

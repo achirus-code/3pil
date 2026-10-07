@@ -94,6 +94,9 @@ const STYLE = `
   .modal-box > .label:first-of-type { margin-top:0 !important; }
   .note.ok { color:var(--sw-green); }
   pre.diag { font-size:11px; white-space:pre-wrap; user-select:text; max-height:240px; overflow:auto; }
+  .pos-table { margin-top:10px; }
+  .pos-table td { vertical-align:top; }
+  .pos-table i.sq { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; }
   details.trades { font-size:12px; }
   details.trades summary { cursor:pointer; color:var(--primary-color); }
   details.trades table { width:100%; border-collapse:collapse; margin-top:4px; }
@@ -463,8 +466,10 @@ class SaeulenBase extends HTMLElement {
     const rows = perf.series.slice(i0);
     const flows = (perf.flows || []).slice(i0);
     const cash = (perf.cash || []).slice(i0);
+    const external = (perf.external || []).slice(i0);
     const names = Object.fromEntries(Object.values(d.pillars).map((p) => [p.key, p]));
-    this._chart = { rows, flows, cash, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
+    names.other = { name: "Sonstige", color: "#8e8e93" };
+    this._chart = { rows, flows, cash, external, exact: !!perf.exact_cash, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
                     colors: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).color || "#888"])) };
     const split = perf.keys.map((k) => {
       const v = cur.pillars[k];
@@ -472,7 +477,10 @@ class SaeulenBase extends HTMLElement {
     }).join("");
     const cashNow = (perf.cash || []).slice(-1)[0];
     const splitCash = cashNow ? `<span><i style="background:#5ac8fa"></i>Cash ${eur(cashNow, 0)}</span>` : "";
-    const inv = cur.invested ? ` · im Zeitraum investiert <b class="num">${signed(cur.invested)}</b> (zählt nicht als Gewinn)` : "";
+    const inv = perf.exact_cash
+      ? [cur.deposits ? `Ein-/Auszahlungen <b class="num">${signed(cur.deposits)}</b> (kein Gewinn)` : "",
+         cur.income != null && Math.abs(cur.income) >= 1 ? `Zinsen, Dividenden, Gebühren <b class="num" style="color:${col(cur.income)}">${signed(cur.income)}</b>` : ""].filter(Boolean).join(" · ")
+      : cur.invested ? `im Zeitraum investiert <b class="num">${signed(cur.invested)}</b> (zählt nicht als Gewinn)` : "";
     const src = perf.history
       ? "Stückzahlen je Tag aus deinen Käufen und Verkäufen bei Trade Republic"
       : d.mode === "depot"
@@ -480,10 +488,40 @@ class SaeulenBase extends HTMLElement {
         : "Papierdepot ab Einstieg";
     return `<div class="label" style="margin-top:12px">Wertentwicklung</div>
       <div class="periods">${chips}</div>
-      <div class="parts" style="margin:2px 0 4px">${split}${splitCash}${inv ? `<span>${inv}</span>` : ""}</div>
+      <div class="parts" style="margin:2px 0 4px">${split}${splitCash}${inv ? `<span>· ${inv}</span>` : ""}</div>
       ${perf.complete ? "" : `<div class="note warn">≈ Kaufhistorie unvollständig – die Gewinne sind eine Annahme mit den heutigen Stückzahlen (Details unten).</div>`}
       ${this.chart(rows)}
-      <div class="note">${src}. Gewinn = Wertänderung ohne neu investiertes Geld. Cash (blau) vor Käufen zurückgerechnet, Ein-/Auszahlungen unbekannt. ▲ Kauf, ▼ Verkauf – mit der Maus oder dem Finger über die Grafik fahren für Einzelwerte.</div>`;
+      ${this.positionsTable(perf, cur, d)}
+      <div class="note">${src}. ${perf.exact_cash
+        ? "Echter Depotwert: alle Positionen plus Cash, Cash je Tag aus allen Geldbewegungen der Zeitleiste. Gewinn = Wertänderung ohne Ein- und Auszahlungen; Dividenden und Zinsen zählen dazu."
+        : "Gewinn = Wertänderung ohne neu investiertes Geld. Cash (blau) vor Käufen zurückgerechnet, Ein-/Auszahlungen unbekannt."} Kurse von Trade Republic${(perf.positions || []).some((p) => p.price_source !== "tr") ? ", ergänzt um Yahoo Finance" : ""}. ▲ Kauf, ▼ Verkauf – mit der Maus oder dem Finger über die Grafik fahren für Einzelwerte.</div>`;
+  }
+
+  positionsTable(perf, cur, d) {
+    const list = (perf.positions || []).slice().sort((a, b) => b.value - a.value);
+    if (!list.length) return "";
+    const held = {};
+    for (const p of Object.values(d.pillars)) for (const h of p.held || []) {
+      const id = h.physical ? `${h.isin}:${h.name}` : h.isin;
+      const e = held[id] || (held[id] = { cost: 0, value: 0, since: h.since });
+      e.cost += h.cost || 0; e.value += h.value || 0;
+    }
+    for (const u of (d.depot && d.depot.unassigned) || []) held[u.isin] = held[u.isin] || { value: u.value };
+    const names = { other: "Sonstige", ...Object.fromEntries(Object.values(d.pillars).map((p) => [p.key, p.name])) };
+    const colors = { other: "#8e8e93", ...Object.fromEntries(Object.values(d.pillars).map((p) => [p.key, p.color])) };
+    const signed = (v) => v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${eur(Math.abs(v), 0)}`;
+    const col = (v) => v == null || Math.abs(v) < 0.5 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
+    return `<table class="stats pos-table"><tr><th>Position</th><th>Wert</th><th>Im Zeitraum</th><th>Seit Kauf</th><th></th></tr>
+      ${list.map((p) => {
+        const g = (cur.positions || {})[p.isin];
+        const h = held[p.isin] || {};
+        const total = h.cost ? h.value - h.cost : null;
+        return `<tr><td><i class="sq" style="background:${esc(colors[p.pillar] || "#888")}"></i>${esc(p.name)}<br><span class="muted">${esc(names[p.pillar] || "")}${p.first ? ` · seit ${new Date(p.first).toLocaleDateString("de-DE")}` : ""}</span></td>
+          <td class="num">${eur(p.value, 0)}</td>
+          <td class="num" style="color:${col(g)}">${signed(g)}</td>
+          <td class="num" style="color:${col(total)}">${signed(total)}</td>
+          <td class="num" style="color:${col(total)}">${total != null && h.cost ? pct(total / h.cost, 2) : ""}</td></tr>`;
+      }).join("")}</table>`;
   }
 
   // Gestapelte Flächen: je Säule in ihrer Farbe, Cash blau obendrauf
@@ -504,7 +542,7 @@ class SaeulenBase extends HTMLElement {
     const { tot, lo, hi, x, y } = this._geom(rows, cash, W, H, L, R, T, B);
     // Schichten von unten: Säulen (Wertpapiere) in Säulenfarbe, dann Cash
     const layers = [...keys.map((k, j) => ({ color: colors[k], val: (r) => r[2 + j] || 0 })),
-                    { color: "#5ac8fa", val: (r, i) => cash[i] || 0, cash: true }];
+                    { color: "#5ac8fa", val: (r, i) => Math.max(cash[i] || 0, 0), cash: true }];
     let base = rows.map(() => lo);
     const paths = layers.map((ly) => {
       const upper = rows.map((r, i) => base[i] + ly.val(r, i));
@@ -563,14 +601,16 @@ class SaeulenBase extends HTMLElement {
       const px = x(i), py = y(tot[i]);
       cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.style.display = "";
       dot.style.display = ""; dot.style.left = `${px / W * 100}%`; dot.style.top = `${py / H * 100}%`;
-      const inv = (flows || []).slice(1, i + 1).reduce((a, f) => a + f[0], 0);
-      const gain = r[1] - first[1] - inv;
+      const exact = this._chart.exact;
+      const inv = exact ? (this._chart.external || []).slice(1, i + 1).reduce((a, v) => a + v, 0)
+                        : (flows || []).slice(1, i + 1).reduce((a, f) => a + f[0], 0);
+      const gain = exact ? tot[i] - tot[0] - inv : r[1] - first[1] - inv;
       tip.innerHTML = `<b>${new Date(r[0]).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" })}</b>
         <div class="row"><span>Gesamt</span><b class="num">${eur(tot[i], 0)}</b></div>
         ${keys.map((k, j) => r[2 + j] ? `<div class="row"><span><i style="background:${esc(colors[k])}"></i>${esc(names[k])}</span><span class="num">${eur(r[2 + j], 0)}</span></div>` : "").join("")}
         ${cash.length ? `<div class="row"><span><i style="background:#5ac8fa"></i>Cash</span><span class="num">${eur(cash[i] || 0, 0)}</span></div>` : ""}
         <div class="row sep"><span>Gewinn seit ${new Date(first[0]).toLocaleDateString("de-DE")}</span><b class="num" style="color:${colr(gain)}">${sign(gain)}</b></div>
-        ${Math.abs(inv) >= 1 ? `<div class="row"><span>investiert seitdem</span><span class="num">${sign(inv)}</span></div>` : ""}
+        ${Math.abs(inv) >= 1 ? `<div class="row"><span>${exact ? "Ein-/Auszahlungen seitdem" : "investiert seitdem"}</span><span class="num">${sign(inv)}</span></div>` : ""}
         ${(events || []).filter((e) => e.date === r[0] || (i > 0 && e.date > rows[i - 1][0] && e.date <= r[0])).map((e) =>
           `<div class="row ev"><span>${e.amount >= 0 ? "▲ Kauf" : "▼ Verkauf"} ${esc(e.name)}</span><span class="num">${eur(Math.abs(e.amount), 0)}${e.shares ? ` · ${Math.abs(e.shares).toLocaleString("de-DE", { maximumFractionDigits: 3 })} St.` : ""}</span></div>`).join("")}`;
       tip.style.display = "";
