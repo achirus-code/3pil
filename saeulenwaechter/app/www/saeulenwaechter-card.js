@@ -94,6 +94,8 @@ const STYLE = `
   .modal-box > .label:first-of-type { margin-top:0 !important; }
   .note.ok { color:var(--sw-green); }
   pre.diag { font-size:11px; white-space:pre-wrap; user-select:text; max-height:240px; overflow:auto; }
+  .toggles { display:flex; gap:16px; font-size:12px; color:var(--secondary-text-color); margin:2px 0 6px; flex-wrap:wrap; }
+  .toggles input { vertical-align:-2px; margin-right:4px; }
   .alltime { padding:10px 12px; border-radius:10px; background:rgba(127,127,127,.1); margin:6px 0 10px; }
   .alltime > div:first-child { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
   .alltime b.num { font-size:20px; }
@@ -449,8 +451,22 @@ class SaeulenBase extends HTMLElement {
   }
 
   performance(d) {
-    const perf = d.performance;
+    let perf = d.performance;
     if (!perf || !perf.series || perf.series.length < 2) return this.history(d);
+    // Haken: Zinsen bzw. Steuern einrechnen (Standard: ja). Abgezogen wird ihr Anteil am Gewinn.
+    if (this._incInterest === undefined) {
+      try {
+        this._incInterest = localStorage.getItem("sw-inc-interest") !== "0";
+        this._incTaxes = localStorage.getItem("sw-inc-taxes") !== "0";
+      } catch (e) { this._incInterest = true; this._incTaxes = true; }
+    }
+    const incInt = this._incInterest !== false, incTax = this._incTaxes !== false;
+    const adj = (p) => p ? { ...p, gain: p.gain - (incInt ? 0 : p.interest || 0) - (incTax ? 0 : p.taxes || 0) } : p;
+    perf = { ...perf, periods: Object.fromEntries(Object.entries(perf.periods).map(([k, p]) => {
+      const a = adj(p);
+      if (a && p && p.pct != null && p.gain) a.pct = p.pct * (a.gain / p.gain);
+      return [k, a];
+    })) };
     const LABELS = { "1W": "1 Woche", "1M": "1 Monat", "3M": "3 Monate", "6M": "6 Monate", YTD: "Seit 1.1.",
                      "1J": "1 Jahr", "3J": "3 Jahre", "5J": "5 Jahre", MAX: "Alle Kurse" };
     const avail = Object.keys(LABELS).filter((k) => perf.periods[k]);
@@ -472,9 +488,10 @@ class SaeulenBase extends HTMLElement {
     const cash = (perf.cash || []).slice(i0);
     const external = (perf.external || []).slice(i0);
     const income = (perf.income || []).slice(i0);
+    const interestS = (perf.interest || []).slice(i0), taxesS = (perf.taxes || []).slice(i0);
     const names = Object.fromEntries(Object.values(d.pillars).map((p) => [p.key, p]));
     names.other = { name: "Sonstige", color: "#8e8e93" };
-    this._chart = { rows, flows, cash, external, income, exact: !!perf.exact_cash, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
+    this._chart = { rows, flows, cash, external, income, interest: interestS, taxes: taxesS, exact: !!perf.exact_cash, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
                     colors: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).color || "#888"])) };
     const split = perf.keys.map((k) => {
       const v = cur.pillars[k];
@@ -485,14 +502,18 @@ class SaeulenBase extends HTMLElement {
     const inv = cur.income != null
       ? [cur.invested ? `gekauft/verkauft netto <b class="num">${signed(cur.invested)}</b> (kein Gewinn)` : "",
          cur.deposits ? `Ein-/Auszahlungen <b class="num">${signed(cur.deposits)}</b> (kein Gewinn)` : "",
-         cur.income != null && Math.abs(cur.income) >= 1 ? `Dividenden, Zinsen, Steuern <b class="num" style="color:${col(cur.income)}">${signed(cur.income)}</b>` : ""].filter(Boolean).join(" · ")
+         cur.income != null && Math.abs(cur.income - (incInt ? 0 : cur.interest || 0) - (incTax ? 0 : cur.taxes || 0)) >= 1 ? `${["Dividenden", incInt ? "Zinsen" : "", incTax ? "Steuern" : ""].filter(Boolean).join(", ")} <b class="num">${signed(cur.income - (incInt ? 0 : cur.interest || 0) - (incTax ? 0 : cur.taxes || 0))}</b>` : ""].filter(Boolean).join(" · ")
       : cur.invested ? `im Zeitraum investiert <b class="num">${signed(cur.invested)}</b> (zählt nicht als Gewinn)` : "";
     const src = perf.history
       ? "Stückzahlen je Tag aus deinen Käufen und Verkäufen bei Trade Republic"
       : d.mode === "depot"
         ? "<b>Ohne Kaufhistorie</b> – mit den heutigen Stückzahlen gerechnet. Einmal „Neu synchronisieren“, dann liest die App deine Käufe und Verkäufe"
         : "Papierdepot ab Einstieg";
-    const at = perf.all_time;
+    const at0 = perf.all_time;
+    const at = at0 ? { ...at0, gain: at0.gain - (incInt ? 0 : at0.interest) - (incTax ? 0 : at0.taxes) } : null;
+    if (at && at0.pct != null && at0.gain) at.pct = at0.pct * (at.gain / at0.gain);
+    const toggles = `<div class="toggles"><label><input type="checkbox" data-inc="interest" ${incInt ? "checked" : ""}> Zinsen einrechnen</label>
+      <label><input type="checkbox" data-inc="taxes" ${incTax ? "checked" : ""}> Steuern einrechnen</label></div>`;
     const allTime = at ? `<div class="alltime">
         <div><span class="k">Seit Beginn${at.since ? ` (${new Date(at.since).toLocaleDateString("de-DE")})` : ""} · exakt aus den Buchungen</span>
           <b class="num" style="color:${col(at.gain)}">${signed(at.gain)}</b>${at.pct != null ? ` <span class="num" style="color:${col(at.gain)}">${pct(at.pct, 2)}</span>` : ""}</div>
@@ -501,7 +522,7 @@ class SaeulenBase extends HTMLElement {
           <span>Dividenden <b class="num">${signed(at.dividends)}</b></span>
           <span>Zinsen <b class="num">${signed(at.interest)}</b></span>
           <span>Steuern/Erstattungen <b class="num">${signed(at.taxes)}</b></span>
-          <span><b>ohne Zinsen <span class="num" style="color:${col(at.without_interest)}">${signed(at.without_interest)}</span></b> (vergleichbar mit TR)</span>
+
           ${at.physical_gold != null ? `<span>physisches Gold <b class="num" style="color:${col(at.physical_gold)}">${signed(at.physical_gold)}</b> (nicht bei TR)</span>` : ""}
         </div>
         <div class="note">Heutiger Wert bei Trade Republic ${eur(at.securities + at.cash, 0)} (Wertpapiere ${eur(at.securities, 0)} + Cash ${eur(at.cash, 0)}) − eingezahlt ${eur(at.deposits, 0)}.</div>
@@ -509,6 +530,7 @@ class SaeulenBase extends HTMLElement {
     const miss = (perf.missing_prices || []).length
       ? `<div class="note warn">Ohne Kursverlauf (fehlen in den Zeiträumen): ${perf.missing_prices.map(esc).join(", ")}</div>` : "";
     return `<div class="label" style="margin-top:12px">Wertentwicklung</div>
+      ${toggles}
       ${allTime}
       <div class="periods">${chips}</div>${miss}
       <div class="parts" style="margin:2px 0 4px">${split}${splitCash}${inv ? `<span>· ${inv}</span>` : ""}</div>
@@ -626,7 +648,9 @@ class SaeulenBase extends HTMLElement {
       cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.style.display = "";
       dot.style.display = ""; dot.style.left = `${px / W * 100}%`; dot.style.top = `${py / H * 100}%`;
       const inv = (flows || []).slice(1, i + 1).reduce((a, f) => a + f[0], 0);
-      const inc = (this._chart.income || []).slice(1, i + 1).reduce((a, v) => a + v, 0);
+      const sumOf = (arr) => (arr || []).slice(1, i + 1).reduce((a, v) => a + v, 0);
+      const inc = sumOf(this._chart.income) - (this._incInterest === false ? sumOf(this._chart.interest) : 0)
+        - (this._incTaxes === false ? sumOf(this._chart.taxes) : 0);
       const gain = r[1] - first[1] - inv + inc;
       tip.innerHTML = `<b>${new Date(r[0]).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" })}</b>
         <div class="row"><span>Gesamt</span><b class="num">${eur(tot[i], 0)}</b></div>
@@ -746,6 +770,12 @@ Soll eine Position mitzählen: ISIN in den Optionen unter „Weitere ISINs …�
     this.shadowRoot.querySelectorAll("[data-period]").forEach((b) =>
       b.addEventListener("click", (e) => { e.stopPropagation(); this._period = b.dataset.period; this._render(); }));
     this._bindChart();
+    this.shadowRoot.querySelectorAll("[data-inc]").forEach((cb) =>
+      cb.addEventListener("change", () => {
+        if (cb.dataset.inc === "interest") this._incInterest = cb.checked; else this._incTaxes = cb.checked;
+        try { localStorage.setItem(`sw-inc-${cb.dataset.inc}`, cb.checked ? "1" : "0"); } catch (e) { /* egal */ }
+        this._render();
+      }));
     const open = this.shadowRoot.querySelector("[data-perf-open]");
     if (open) open.addEventListener("click", (e) => { e.stopPropagation(); this._perfOpen = true; this._render(); });
     this.shadowRoot.querySelectorAll("[data-perf-close]").forEach((el) =>

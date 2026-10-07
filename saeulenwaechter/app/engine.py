@@ -1112,13 +1112,18 @@ class Engine:
         # (nie deutlich unter null). Sonst Näherung: Cash vor Käufen zurückgerechnet.
         external = [0.0] * len(rows)
         income = [0.0] * len(rows)
+        interest = [0.0] * len(rows)  # Teil von income
+        taxes = [0.0] * len(rows)     # Teil von income
         ev = sorted(cash_events, key=lambda e: e["date"]) if exact_cash else []
         for i, r in enumerate(rows):
             prev = rows[i - 1][0] if i else None
             if prev is None:
                 continue
             external[i] = round(sum(e["amount"] for e in ev if e["kind"] == "external" and prev < e["date"] <= r[0]), 2)
-            income[i] = round(sum(e["amount"] for e in ev if e["kind"] == "income" and prev < e["date"] <= r[0]), 2)
+            day_inc = [e for e in ev if e["kind"] == "income" and prev < e["date"] <= r[0]]
+            income[i] = round(sum(e["amount"] for e in day_inc), 2)
+            interest[i] = round(sum(e["amount"] for e in day_inc if "INTEREST" in str(e.get("type") or "").upper()), 2)
+            taxes[i] = round(sum(e["amount"] for e in day_inc if "TAX" in str(e.get("type") or "").upper()), 2)
         cash_series = []
         if exact_cash:
             for r in rows:
@@ -1163,6 +1168,7 @@ class Engine:
             gain = rows[n][1] - rows[i0][1] - invested[0] + (other or 0)
             base = rows[i0][1] + max(invested[0], 0)
             periods[label] = {"from": rows[i0][0], "gain": round(gain, 2), "invested": round(invested[0], 2),
+                              "interest": round(sum(interest[i0 + 1:]), 2), "taxes": round(sum(taxes[i0 + 1:]), 2),
                               "deposits": round(ext, 2) if ext is not None else None,
                               "income": round(other, 2) if other is not None else None,
                               "pct": gain / base if base else None, "pillars": pillar_gain, "positions": positions}
@@ -1183,7 +1189,8 @@ class Engine:
                  "price_source": self.state["market"].get(ln["isin"], {}).get("_candles_src", "tr"), "sold": ln["sold"],
                  "first": min((t["date"] for t in ln["trades"]), default=None)} for li, ln in enumerate(lines)]
         return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events,
-                "cash": cash_series, "external": external, "income": income, "exact_cash": exact_cash,
+                "cash": cash_series, "external": external, "income": income, "interest": interest,
+                "taxes": taxes, "exact_cash": exact_cash,
                 "positions": info,
                 "history": all(ln["known"] for ln in lines if not ln["physical"] and not ln["sold"]),
                 "complete": all(c["complete"] for c in coverage), "coverage": coverage,

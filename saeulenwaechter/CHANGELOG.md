@@ -3,6 +3,7 @@
 ## 2.12.0
 
 - „Seit Beginn“ exakt aus den Buchungen: heutiger Wert bei Trade Republic (Wertpapiere + Cash) − eingezahltes Geld, aufgeteilt in Kursgewinne, Dividenden, Zinsen und Steuern; dazu „ohne Zinsen“ zum Vergleich mit der TR-App. Physisches Gold separat.
+- Haken „Zinsen einrechnen“ und „Steuern einrechnen“ in der Wertentwicklung: wirken auf alle Zeiträume, „Seit Beginn“ und den Tooltip; die Wahl bleibt im Browser gespeichert.
 - Hinweis, wenn für eine Position kein Kursverlauf vorliegt; „Max.“ heißt jetzt „Alle Kurse“ (reicht nur so weit zurück wie die Tageskurse).
 
 ## 2.11.2
