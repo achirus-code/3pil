@@ -39,6 +39,7 @@ def make_app(engine: Engine, on_change: Callable[[], Awaitable[None]] | None = N
     app.router.add_get("/", index)
     app.router.add_get("/saeulenwaechter-card.js", card)
     app.router.add_get("/api/data", data)
+    app.router.add_get("/api/performance", performance)
     app.router.add_post("/api/action", action)
     app.router.add_get("/api/login", login_status)
     app.router.add_post("/api/login/start", login_start)
@@ -82,6 +83,16 @@ async def data(request: web.Request) -> web.Response:
     out["login"] = engine.login_status()
     out["last_error"] = engine.last_error
     return _no_cache(web.json_response(out))
+
+
+async def performance(request: web.Request) -> web.Response:
+    """Wertentwicklung (Popup) – im Hintergrund-Thread gerechnet, damit die Seite flüssig bleibt."""
+    engine = request.app[ENGINE]
+    if not engine.data:
+        return web.json_response({"error": "noch keine Daten"}, status=503)
+    import asyncio
+    perf = await asyncio.get_running_loop().run_in_executor(None, engine.performance_data)
+    return _no_cache(web.json_response(perf or {}))
 
 
 async def _json(request: web.Request) -> dict:

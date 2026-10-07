@@ -264,7 +264,9 @@ async def test_web_data_actions_and_login(make_engine, sent, aiohttp_client, mon
     assert r.status == 200 and changes
     data = await (await client.get("/api/data")).json()
     assert set(data["pillars"]) == {"welt", "gold", "anleihen"} and data["login"]["logged_in"] is False
-    assert "events" not in data
+    assert "events" not in data and "performance" not in data and data["performance_available"]
+    perf = await (await client.get("/api/performance")).json()
+    assert {"periods", "series", "keys"} <= set(perf)
 
     await client.post("/api/action", json={"action": "test"})
     assert "Testnachricht" in sent[-1]
@@ -545,7 +547,7 @@ async def test_ha_service_notification(aiohttp_client):
 async def test_performance_periods_and_series(make_engine, market):
     eng = await make_engine()
     d = await eng.refresh()
-    perf = d["performance"]
+    perf = eng.performance_data()
     assert list(perf["periods"]) == ["1W", "1M", "3M", "6M", "YTD", "1J", "3J", "5J", "MAX"]
     one = perf["periods"]["1M"]
     assert one["from"] <= "2026-09-06" and isinstance(one["gain"], float)
@@ -584,7 +586,7 @@ async def test_performance_uses_trade_history(make_engine, market, monkeypatch):
     eng = await make_engine()
     eng.tr.cookies = {"tr_session": "s"}
     d = await eng.refresh()
-    perf = d["performance"]
+    perf = eng.performance_data()
     assert perf["history"] is True
     rows = {r[0]: r for r in perf["series"]}
     before = max(day for day in rows if day < "2026-03-02")
@@ -622,7 +624,7 @@ async def test_performance_real_depot_with_cash_events(make_engine, market, monk
     eng = await make_engine()
     eng.tr.cookies = {"tr_session": "s"}
     d = await eng.refresh()
-    perf = d["performance"]
+    perf = eng.performance_data()
     assert perf["exact_cash"] and perf["complete"]
     rows, cash = perf["series"], perf["cash"]
     before = max(i for i, r in enumerate(rows) if r[0] < "2026-03-01")
@@ -644,7 +646,7 @@ async def test_performance_real_depot_with_cash_events(make_engine, market, monk
     # beim Verkauf einbehaltene Steuer zählt als Steuer (netto negativ), Kursgewinn davor entsprechend höher
     eng.state["trades"][1]["tax"] = 20.0
     d = await eng.refresh()
-    at = d["performance"]["all_time"]
+    at = eng.performance_data()["all_time"]
     assert at["taxes"] == -20.0 and at["tax_paid"] == 20.0
     assert at["trading"] == pytest.approx(at["gain"] - 5.0 + 20.0, abs=0.05)
 
@@ -673,7 +675,7 @@ async def test_performance_includes_sold_positions(make_engine, market, monkeypa
     eng = await make_engine()
     eng.tr.cookies = {"tr_session": "s"}
     d = await eng.refresh()
-    perf = d["performance"]
+    perf = eng.performance_data()
     assert perf["exact_cash"] and perf["complete"]
     rows, cash = perf["series"], perf["cash"]
     keys = perf["keys"]

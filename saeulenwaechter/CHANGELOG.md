@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.13.0
+
+- Schneller: Die Wertentwicklung wird erst beim Öffnen des Popups berechnet (im Hintergrund, mit Ladebalken) und zwischengespeichert. Die Seite lädt dadurch nur noch ~15 KB statt ~275 KB pro Aktualisierung.
+- Berechnung des Verlaufs deutlich schneller (Käufe/Verkäufe mit Zeiger statt Summe je Tag); Käufe an Tagen ohne Kurs (z. B. Wochenende, physisches Gold) werden korrekt als Zufluss gezählt.
+
 ## 2.12.3
 
 - Nach einem Neustart (z. B. Update) sofort Daten aus dem gespeicherten Stand statt „Säulenwächter hat noch keine Daten“; die aktuellen Kurse werden im Hintergrund geladen.

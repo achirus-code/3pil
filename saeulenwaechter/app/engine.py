@@ -365,6 +365,13 @@ class Engine:
     async def async_request_refresh(self) -> None:
         await self.refresh()
 
+    def performance_data(self) -> dict | None:
+        """Wertentwicklung – erst auf Anfrage berechnet und bis zum nächsten Durchlauf zwischengespeichert."""
+        if getattr(self, "_perf_cache", None) is None:
+            inputs = getattr(self, "_perf_inputs", None)
+            self._perf_cache = {"data": self._performance(*inputs) if inputs else None}
+        return self._perf_cache["data"]
+
     def compute_cached(self) -> None:
         """Sofort nach dem Start: aus den gespeicherten Kursen und dem Depotstand rechnen – ohne Netz und ohne
         Entscheidungen oder Meldungen. Die Oberfläche hat so gleich Daten; refresh() holt danach Frisches."""
@@ -834,6 +841,10 @@ class Engine:
                                    "ist": r["ist"], "soll": r["soll"],
                                    "cash": out_pillars[r["key"]]["state"] == STATE_CASH}
                                   for r in overview["rows"]]})
+        self._perf_inputs = (copy.deepcopy(holdings), mode, today,
+                             sum(values[k] for k in pillars if not holdings.get(k)),
+                             copy.deepcopy(unassigned), depot.get("cash") if mode == "depot" else None)
+        self._perf_cache = None
         stats = S.pillar_stats([{"key": k, "name": p["name"], "value": p["value"], "held": p["held"]}
                                 for k, p in out_pillars.items()])
         # Zinsen auf Cash: im Depot das Guthaben bei TR, im Papierdepot die Säulen ohne Position
@@ -868,9 +879,8 @@ class Engine:
             },
             "tr_split": split,
             "reconcile": self._reconcile(depot, holdings, unassigned) if mode == "depot" else None,
-            "performance": self._performance(holdings, mode, today,
-                                             sum(values[k] for k in pillars if not holdings.get(k)),
-                                             unassigned, depot.get("cash") if mode == "depot" else None),
+            # Wertentwicklung wird erst beim Öffnen berechnet (performance_data) – Eingaben hier merken
+            "performance_available": bool(holdings) and any(holdings.values()) or bool(unassigned),
             "tr_trades": [{k: t.get(k) for k in ("date", "isin", "subtitle", "shares", "amount")}
                        for t in self.state.get("trades", [])] if mode == "depot" else [],
             "market_error": market.get("_error"),
@@ -1104,6 +1114,11 @@ class Engine:
         rows, flows, line_vals = [], [], []
         idx = [0] * len(lines)
         last = [None] * len(lines)
+        # Käufe/Verkäufe je Position sortiert und mit Zeiger abgearbeitet (statt je Tag alle zu summieren)
+        sorted_trades = [sorted(ln["trades"], key=lambda t: t["date"]) for ln in lines]
+        tpos = [0] * len(lines)
+        done = [0.0] * len(lines)  # Stückzahl der bis zum Tag erledigten Käufe/Verkäufe
+        totals = [sum(t["shares"] for t in ln["trades"]) for ln in lines]
         for day in days:
             per = dict.fromkeys(keys, 0.0)
             inflow = dict.fromkeys(keys, 0.0)
@@ -1114,11 +1129,18 @@ class Engine:
                     last[i] = series[idx[i]][1]
                     idx[i] += 1
                 price = last[i] if last[i] is not None else series[0][1]
-                held = max(ln["size"] - sum(t["shares"] for t in ln["trades"] if t["date"] > day), 0.0)
+                ts = sorted_trades[i]
+                while tpos[i] < len(ts) and ts[tpos[i]]["date"] <= day:  # auch Käufe an Tagen ohne Kurs (Wochenende)
+                    if day == days[0] and ts[tpos[i]]["date"] < day:
+                        done[i] += ts[tpos[i]]["shares"]  # vor Beginn der Reihe: nur Bestand, kein Zufluss
+                    else:
+                        done[i] += ts[tpos[i]]["shares"]
+                        inflow[ln["key"]] += -ts[tpos[i]]["amount"]
+                    tpos[i] += 1
+                held = max(ln["size"] - (totals[i] - done[i]), 0.0)
                 v = held * price
                 lv.append(v)
                 per[ln["key"]] += v
-                inflow[ln["key"]] += sum(-t["amount"] for t in ln["trades"] if t["date"] == day)
             vals = [round(per[k], 2) for k in keys]
             rows.append([day, round(sum(vals), 2), *vals])
             flows.append([round(sum(inflow.values()), 2), *[round(inflow[k], 2) for k in keys]])
