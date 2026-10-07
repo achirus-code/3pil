@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.11.1
+
+- Gewinn korrigiert: Gewinn = Wertänderung der Positionen ohne Käufe/Verkäufe plus Dividenden, Zinsen und Steuern. Ein- und Auszahlungen (und Fehler im Cash-Verlauf) können den Gewinn nicht mehr verfälschen – vorher erschienen z. B. +40.884 € als „Zinsen, Dividenden“.
+- Geldbewegungen nach Ereignistyp von Trade Republic eingeteilt; ausgeblendete Einträge und doppelte Buchungen (alter/neuer Typ) werden übergangen.
+- Cash-Verlauf aus der Zeitleiste nur, wenn er plausibel ist (nie deutlich unter null), sonst Näherung.
+
 ## 2.11.0
 
 - Echter Depotwert in der Wertentwicklung: alle Positionen (Säulen und „Sonstige“, z. B. Einzelaktien) plus Cash. Cash je Tag exakt aus allen Geldbewegungen der Trade-Republic-Zeitleiste.

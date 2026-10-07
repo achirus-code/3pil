@@ -331,17 +331,23 @@ class TradeRepublic:
             isin = _isin_from_icon(it.get("icon")) or _isin_from_icon(it.get("action")) \
                 or _isin_from_icon(it.get("instrumentId") or it.get("isin"))
             etype = str(it.get("eventType") or it.get("type") or "?")
-            types[etype] = types.get(etype, 0) + 1
             amount = _f(_amount(it.get("amount")))
             status = str(it.get("status") or "").upper()
+            t = types.setdefault(etype, {"n": 0, "hidden": 0, "skipped": 0, "sum": 0.0})
+            t["n"] += 1
+            if it.get("hidden"):
+                t["hidden"] += 1
             if amount and status not in ("CANCELED", "CANCELLED", "FAILED", "PENDING", "REJECTED") \
-                    and not it.get("deleted"):
+                    and not it.get("deleted") and not it.get("hidden"):
                 try:
                     day = datetime.fromisoformat(str(it["timestamp"]).replace("Z", "+00:00")).date().isoformat()
                     cash_events.append({"date": day, "amount": amount, "isin": isin,
                                         "kind": classify_cash(it, isin), "type": etype})
+                    t["sum"] = round(t["sum"] + amount, 2)
                 except (KeyError, ValueError):
                     pass
+            else:
+                t["skipped"] += 1
             if isin:
                 diag["with_isin"] += 1
             if not isin or (isins is not None and isin not in isins):
@@ -413,7 +419,19 @@ class TradeRepublic:
                 diag["estimated"] += 1
                 kept.append(t)
         trades = kept
-        diag["event_types"] = dict(sorted(types.items(), key=lambda kv: -kv[1])[:25])
+        # Dieselbe Buchung kann unter altem und neuem Ereignistyp doppelt vorkommen (z. B. ORDER_EXECUTED und
+        # TRADE_INVOICE): gleiche Tag/Betrag/ISIN mit verschiedenem Typ nur einmal zählen
+        seen: dict[tuple, str] = {}
+        unique = []
+        for e in cash_events:
+            key = (e["date"], round(e["amount"], 2), e["isin"])
+            if key in seen and seen[key] != e["type"]:
+                diag["duplicates"] = diag.get("duplicates", 0) + 1
+                continue
+            seen.setdefault(key, e["type"])
+            unique.append(e)
+        self.last_cash_events = cash_events = unique
+        diag["event_types"] = dict(sorted(types.items(), key=lambda kv: -kv[1]["n"])[:25])
         diag["cash_kinds"] = {k: sum(1 for e in cash_events if e["kind"] == k) for k in ("trade", "income", "external")}
         _LOGGER.info("TR-Zeitleiste: %s", {k: v for k, v in diag.items()})
         for t in trades:
@@ -617,9 +635,24 @@ INCOME_WORDS = ("dividend", "ausschüttung", "ausschuettung", "zinsen", "interes
                 "ertrag", "steuer", "tax", "prämie", "bonus", "corporate_action", "kapitalmaßnahme")
 
 
+EVENT_KINDS = {
+    "TRADING_TRADE_EXECUTED": "trade", "TRADE_INVOICE": "trade", "ORDER_EXECUTED": "trade",
+    "TRADING_SAVINGSPLAN_EXECUTED": "trade", "SAVINGS_PLAN_EXECUTED": "trade", "SAVINGS_PLAN_INVOICE_CREATED": "trade",
+    "TRADE_CORRECTED": "trade",
+    "SSP_CORPORATE_ACTION_CASH": "income", "CREDIT": "income", "INTEREST_PAYOUT": "income",
+    "INTEREST_PAYOUT_CREATED": "income", "SSP_TAX_CORRECTION": "income", "TAX_REFUND": "income",
+    "BANK_TRANSACTION_INCOMING": "external", "BANK_TRANSACTION_OUTGOING": "external",
+    "PAYMENT_INBOUND": "external", "PAYMENT_OUTBOUND": "external", "CARD_AFT": "external",
+    "CARD_VERIFICATION": "external", "CARD_TRANSACTION": "external",
+}
+
+
 def classify_cash(it: dict, isin: str | None) -> str:
     """Art einer Geldbewegung: „trade“ (Kauf/Verkauf), „income“ (zählt zum Gewinn) oder „external“
     (Ein-/Auszahlung, Karte, Überweisung – zählt nicht zum Gewinn)."""
+    known = EVENT_KINDS.get(str(it.get("eventType") or it.get("type") or "").upper())
+    if known:
+        return known
     label = f"{it.get('subtitle') or ''} {it.get('eventType') or it.get('type') or ''} {it.get('title') or ''}".lower()
     if it.get("dividend") or any(w in label for w in INCOME_WORDS):
         return "income"
