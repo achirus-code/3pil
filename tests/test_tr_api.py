@@ -229,3 +229,8 @@ def test_find_shares_in_transaction_row():
         {"title": "Gebühr", "detail": {"text": "1,00 €"}}]}]}
     assert find_shares(detail) == pytest.approx(2805.927158)
     assert find_shares({"data": [{"title": "Ausführung", "detail": {"text": "38,5 x 4,29 €"}}]}) == pytest.approx(38.5)
+    # echte Texte von Trade Republic: Tausenderpunkt ohne Nachkommastellen
+    assert find_shares({"data": [{"title": "Transaktion", "detail": {"text": "1.500 ×  11,932\xa0€"}}]}) == 1500
+    assert find_shares({"data": [{"title": "Transaktion", "detail": {"text": "20 ×  366,60\xa0€"}}]}) == 20
+    assert find_shares({"data": [{"title": "Transaktion", "detail": {"text": "1.468,642385 ×  11,936\xa0€"}}]}) == \
+        pytest.approx(1468.642385)

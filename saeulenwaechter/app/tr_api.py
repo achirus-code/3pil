@@ -609,6 +609,8 @@ def _de_number(text: Any) -> float | None:
     t = m.group(0)
     if "," in t:
         t = t.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"-?\d{1,3}(?:\.\d{3})+", t):  # „1.500“ = tausendfünfhundert (deutsche Schreibweise)
+        t = t.replace(".", "")
     try:
         return float(t)
     except ValueError:

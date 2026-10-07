@@ -223,8 +223,12 @@ class SaeulenBase extends HTMLElement {
     try {
       this._data = await this._hass.callWS({ type: "saeulenwaechter/data" });
       this._error = null;
+      this._retries = 0;
     } catch (e) {
-      this._error = e.message || String(e);
+      // kurzer Netzaussetzer (z. B. Home Assistant startet neu): alte Daten stehen lassen und bald neu versuchen
+      this._retries = (this._retries || 0) + 1;
+      if (!this._data) this._error = `${e.message || e} – neuer Versuch …`;
+      if (this._retries <= 20) setTimeout(() => this._load(), Math.min(2000 * this._retries, 15000));
     }
     this._loading = false;
     this._render();

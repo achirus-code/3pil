@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.10.3
+
+- Stückzahlen wie „1.500“ (deutscher Tausenderpunkt) wurden als 1,5 gelesen – dadurch fehlten Stücke in der Historie. Behoben.
+- „Failed to fetch“: Bei einem kurzen Verbindungsabbruch (z. B. Neustart von Home Assistant) bleiben die letzten Daten stehen und die Seite versucht es nach wenigen Sekunden erneut.
+
 ## 2.10.2
 
 - Stückzahl aus den Transaktionsdetails im aktuellen Format „Transaktion: 2.805,927158 × 11,51 €“ – vorher wurde sie fast nie gefunden und nur geschätzt.
