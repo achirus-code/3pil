@@ -41,6 +41,7 @@ async def main() -> None:
             aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar()) as tr_session:
         engine = Engine(DATA_DIR, options, http, tr_session)
         await engine.async_load()
+        engine.compute_cached()  # Oberfläche hat sofort Daten, frische Kurse folgen im ersten Durchlauf
         publisher = HomeAssistantPublisher(http)
 
         async def changed() -> None:

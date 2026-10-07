@@ -682,3 +682,15 @@ async def test_performance_includes_sold_positions(make_engine, market, monkeypa
     assert min(cash) >= 0
     sold = [p for p in perf["positions"] if p["sold"]]
     assert [p["isin"] for p in sold] == ["DE000A0S9GB0"]
+
+
+async def test_cached_data_right_after_start(make_engine):
+    """Nach einem Neustart sofort Daten aus dem gespeicherten Stand – ohne Netz, ohne Zustand zu ändern."""
+    eng = await make_engine()
+    await eng.refresh()
+    state = json.dumps(eng.state, sort_keys=True, default=str)
+    eng2 = await make_engine()
+    assert eng2.data is None
+    eng2.compute_cached()
+    assert eng2.data and eng2.data["cached"] and set(eng2.data["pillars"]) == {"welt", "gold", "anleihen"}
+    assert json.dumps(eng2.state, sort_keys=True, default=str) == state

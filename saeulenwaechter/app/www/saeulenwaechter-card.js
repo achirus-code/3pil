@@ -878,6 +878,7 @@ class SaeulenwaechterPanel extends SaeulenBase {
         <div class="cols">
           <div>
             <ha-card>
+              ${d.cached ? `<div class="note" style="margin:8px 12px 0">Gespeicherter Stand – aktuelle Kurse werden gerade geladen …</div>` : ""}
               ${this.alert(d)}
               ${this.stats(d)}
               <div class="section">

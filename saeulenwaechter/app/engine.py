@@ -365,6 +365,27 @@ class Engine:
     async def async_request_refresh(self) -> None:
         await self.refresh()
 
+    def compute_cached(self) -> None:
+        """Sofort nach dem Start: aus den gespeicherten Kursen und dem Depotstand rechnen – ohne Netz und ohne
+        Entscheidungen oder Meldungen. Die Oberfläche hat so gleich Daten; refresh() holt danach Frisches."""
+        if self.data:
+            return
+        saved = copy.deepcopy(self.state)
+        try:
+            depot: dict[str, Any] = {"connected": False, "error": None, "positions": {}, "cash": None, "synced_at": None}
+            snap = self.snapshot
+            if self.options.get(CONF_USE_DEPOT, True) and snap:
+                depot.update(positions=copy.deepcopy(snap["positions"]), cash=snap.get("cash"),
+                             synced_at=snap.get("synced_at"), connected=True)
+            data = self._compute(self.now(), depot)
+            data["value_history"] = [h for h in saved.get("value_history", []) if h.get("mode") == data["mode"]]
+            data["cached"] = True
+            self.data = data
+        except Exception:  # noqa: BLE001 – dann eben erst nach dem ersten vollständigen Durchlauf
+            _LOGGER.debug("Start ohne gespeicherte Daten", exc_info=True)
+        finally:
+            self.state = saved  # nichts von dieser Vorschau-Rechnung behalten
+
     async def _async_update_data(self) -> dict:
         async with self._lock:
             now = self.now()
