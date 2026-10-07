@@ -234,3 +234,24 @@ def test_find_shares_in_transaction_row():
     assert find_shares({"data": [{"title": "Transaktion", "detail": {"text": "20 ×  366,60\xa0€"}}]}) == 20
     assert find_shares({"data": [{"title": "Transaktion", "detail": {"text": "1.468,642385 ×  11,936\xa0€"}}]}) == \
         pytest.approx(1468.642385)
+
+
+async def test_cash_events_hidden_duplicates_and_kinds():
+    page = {"items": [
+        {"id": "1", "timestamp": "2026-01-02T10:00:00.000+0000", "eventType": "BANK_TRANSACTION_INCOMING",
+         "title": "Einzahlung", "amount": {"value": 1000.0}},
+        {"id": "2", "timestamp": "2026-01-02T10:00:00.000+0000", "eventType": "PAYMENT_INBOUND",
+         "title": "Einzahlung", "amount": {"value": 1000.0}},  # dieselbe Buchung unter altem Typ
+        {"id": "3", "timestamp": "2026-01-03T10:00:00.000+0000", "eventType": "INTEREST_PAYOUT",
+         "title": "Zinsen", "amount": {"value": 3.5}},
+        {"id": "4", "timestamp": "2026-01-04T10:00:00.000+0000", "eventType": "BANK_TRANSACTION_OUTGOING",
+         "title": "Überweisung", "amount": {"value": -200.0}, "hidden": True},
+        {"id": "5", "timestamp": "2026-01-05T10:00:00.000+0000", "eventType": "SSP_CORPORATE_ACTION_CASH",
+         "title": "SPDR", "icon": "logos/IE00B3YLTY66/v2", "amount": {"value": 12.0}}],
+        "cursors": {}}
+    tr = client(lambda payloads: [page if p["type"] == "timelineTransactions" else {} for p in payloads])
+    await tr.transactions(isins={"IE00B3YLTY66"})
+    kinds = [(e["date"], e["amount"], e["kind"]) for e in tr.last_cash_events]
+    assert kinds == [("2026-01-02", 1000.0, "external"), ("2026-01-03", 3.5, "income"), ("2026-01-05", 12.0, "income")]
+    assert tr.last_timeline["duplicates"] == 1
+    assert tr.last_timeline["event_types"]["BANK_TRANSACTION_OUTGOING"]["hidden"] == 1

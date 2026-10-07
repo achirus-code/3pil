@@ -467,9 +467,10 @@ class SaeulenBase extends HTMLElement {
     const flows = (perf.flows || []).slice(i0);
     const cash = (perf.cash || []).slice(i0);
     const external = (perf.external || []).slice(i0);
+    const income = (perf.income || []).slice(i0);
     const names = Object.fromEntries(Object.values(d.pillars).map((p) => [p.key, p]));
     names.other = { name: "Sonstige", color: "#8e8e93" };
-    this._chart = { rows, flows, cash, external, exact: !!perf.exact_cash, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
+    this._chart = { rows, flows, cash, external, income, exact: !!perf.exact_cash, cur, keys: perf.keys, events: (perf.events || []).filter((e) => e.date >= cur.from), names: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).name || k])),
                     colors: Object.fromEntries(perf.keys.map((k) => [k, (names[k] || {}).color || "#888"])) };
     const split = perf.keys.map((k) => {
       const v = cur.pillars[k];
@@ -477,9 +478,10 @@ class SaeulenBase extends HTMLElement {
     }).join("");
     const cashNow = (perf.cash || []).slice(-1)[0];
     const splitCash = cashNow ? `<span><i style="background:#5ac8fa"></i>Cash ${eur(cashNow, 0)}</span>` : "";
-    const inv = perf.exact_cash
-      ? [cur.deposits ? `Ein-/Auszahlungen <b class="num">${signed(cur.deposits)}</b> (kein Gewinn)` : "",
-         cur.income != null && Math.abs(cur.income) >= 1 ? `Zinsen, Dividenden, Gebühren <b class="num" style="color:${col(cur.income)}">${signed(cur.income)}</b>` : ""].filter(Boolean).join(" · ")
+    const inv = cur.income != null
+      ? [cur.invested ? `gekauft/verkauft netto <b class="num">${signed(cur.invested)}</b> (kein Gewinn)` : "",
+         cur.deposits ? `Ein-/Auszahlungen <b class="num">${signed(cur.deposits)}</b> (kein Gewinn)` : "",
+         cur.income != null && Math.abs(cur.income) >= 1 ? `Dividenden, Zinsen, Steuern <b class="num" style="color:${col(cur.income)}">${signed(cur.income)}</b>` : ""].filter(Boolean).join(" · ")
       : cur.invested ? `im Zeitraum investiert <b class="num">${signed(cur.invested)}</b> (zählt nicht als Gewinn)` : "";
     const src = perf.history
       ? "Stückzahlen je Tag aus deinen Käufen und Verkäufen bei Trade Republic"
@@ -493,8 +495,8 @@ class SaeulenBase extends HTMLElement {
       ${this.chart(rows)}
       ${this.positionsTable(perf, cur, d)}
       <div class="note">${src}. ${perf.exact_cash
-        ? "Echter Depotwert: alle Positionen plus Cash, Cash je Tag aus allen Geldbewegungen der Zeitleiste. Gewinn = Wertänderung ohne Ein- und Auszahlungen; Dividenden und Zinsen zählen dazu."
-        : "Gewinn = Wertänderung ohne neu investiertes Geld. Cash (blau) vor Käufen zurückgerechnet, Ein-/Auszahlungen unbekannt."} Kurse von Trade Republic${(perf.positions || []).some((p) => p.price_source !== "tr") ? ", ergänzt um Yahoo Finance" : ""}. ▲ Kauf, ▼ Verkauf – mit der Maus oder dem Finger über die Grafik fahren für Einzelwerte.</div>`;
+        ? "Alle Positionen plus Cash; Cash je Tag aus den Geldbewegungen der Zeitleiste."
+        : "Alle Positionen; Cash (blau) vor Käufen zurückgerechnet (Näherung)."} Gewinn = Wertänderung der Positionen ohne Käufe/Verkäufe, plus Dividenden, Zinsen und Steuern – Ein- und Auszahlungen zählen nie als Gewinn. Kurse von Trade Republic${(perf.positions || []).some((p) => p.price_source !== "tr") ? ", ergänzt um Yahoo Finance" : ""}. ▲ Kauf, ▼ Verkauf – mit der Maus oder dem Finger über die Grafik fahren für Einzelwerte.</div>`;
   }
 
   positionsTable(perf, cur, d) {
@@ -601,16 +603,16 @@ class SaeulenBase extends HTMLElement {
       const px = x(i), py = y(tot[i]);
       cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.style.display = "";
       dot.style.display = ""; dot.style.left = `${px / W * 100}%`; dot.style.top = `${py / H * 100}%`;
-      const exact = this._chart.exact;
-      const inv = exact ? (this._chart.external || []).slice(1, i + 1).reduce((a, v) => a + v, 0)
-                        : (flows || []).slice(1, i + 1).reduce((a, f) => a + f[0], 0);
-      const gain = exact ? tot[i] - tot[0] - inv : r[1] - first[1] - inv;
+      const inv = (flows || []).slice(1, i + 1).reduce((a, f) => a + f[0], 0);
+      const inc = (this._chart.income || []).slice(1, i + 1).reduce((a, v) => a + v, 0);
+      const gain = r[1] - first[1] - inv + inc;
       tip.innerHTML = `<b>${new Date(r[0]).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" })}</b>
         <div class="row"><span>Gesamt</span><b class="num">${eur(tot[i], 0)}</b></div>
         ${keys.map((k, j) => r[2 + j] ? `<div class="row"><span><i style="background:${esc(colors[k])}"></i>${esc(names[k])}</span><span class="num">${eur(r[2 + j], 0)}</span></div>` : "").join("")}
         ${cash.length ? `<div class="row"><span><i style="background:#5ac8fa"></i>Cash</span><span class="num">${eur(cash[i] || 0, 0)}</span></div>` : ""}
         <div class="row sep"><span>Gewinn seit ${new Date(first[0]).toLocaleDateString("de-DE")}</span><b class="num" style="color:${colr(gain)}">${sign(gain)}</b></div>
-        ${Math.abs(inv) >= 1 ? `<div class="row"><span>${exact ? "Ein-/Auszahlungen seitdem" : "investiert seitdem"}</span><span class="num">${sign(inv)}</span></div>` : ""}
+        ${Math.abs(inv) >= 1 ? `<div class="row"><span>gekauft/verkauft netto seitdem</span><span class="num">${sign(inv)}</span></div>` : ""}
+        ${Math.abs(inc) >= 1 ? `<div class="row"><span>Dividenden, Zinsen, Steuern</span><span class="num">${sign(inc)}</span></div>` : ""}
         ${(events || []).filter((e) => e.date === r[0] || (i > 0 && e.date > rows[i - 1][0] && e.date <= r[0])).map((e) =>
           `<div class="row ev"><span>${e.amount >= 0 ? "▲ Kauf" : "▼ Verkauf"} ${esc(e.name)}</span><span class="num">${eur(Math.abs(e.amount), 0)}${e.shares ? ` · ${Math.abs(e.shares).toLocaleString("de-DE", { maximumFractionDigits: 3 })} St.` : ""}</span></div>`).join("")}`;
       tip.style.display = "";

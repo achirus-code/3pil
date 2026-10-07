@@ -1087,23 +1087,30 @@ class Engine:
             flows.append([0.0] * (len(keys) + 1))
             line_vals.append(list(line_vals[-1]))
 
-        # Cash je Tag und Ein-/Auszahlungen je Tag
+        # Cash je Tag: exakt aus den Geldbewegungen der Zeitleiste – aber nur, wenn das Ergebnis plausibel ist
+        # (nie deutlich unter null). Sonst Näherung: Cash vor Käufen zurückgerechnet.
         external = [0.0] * len(rows)
+        income = [0.0] * len(rows)
+        ev = sorted(cash_events, key=lambda e: e["date"]) if exact_cash else []
+        for i, r in enumerate(rows):
+            prev = rows[i - 1][0] if i else None
+            if prev is None:
+                continue
+            external[i] = round(sum(e["amount"] for e in ev if e["kind"] == "external" and prev < e["date"] <= r[0]), 2)
+            income[i] = round(sum(e["amount"] for e in ev if e["kind"] == "income" and prev < e["date"] <= r[0]), 2)
+        cash_series = []
         if exact_cash:
-            ev = sorted(cash_events, key=lambda e: e["date"])
-            cash_series = []
-            for i, r in enumerate(rows):
-                after = sum(e["amount"] for e in ev if e["date"] > r[0])
-                cash_series.append(round(depot_cash - after, 2))
-                prev = rows[i - 1][0] if i else "0000"
-                external[i] = round(sum(e["amount"] for e in ev if e["kind"] == "external"
-                                        and prev < e["date"] <= r[0]) if i else 0.0, 2)
-        else:
+            for r in rows:
+                cash_series.append(round(depot_cash - sum(e["amount"] for e in ev if e["date"] > r[0]), 2))
+            if min(cash_series) < -max(500.0, 0.02 * abs(depot_cash)):
+                _LOGGER.info("Cash-Verlauf aus der Zeitleiste unplausibel (min %.0f €) – Näherung", min(cash_series))
+                exact_cash = False
+        if not exact_cash:
             cash_series = []
             later_in = sum(f[0] for f in flows)
             for f in flows:
                 later_in -= f[0]
-                cash_series.append(round(max(cash_now + later_in, 0.0), 2))
+                cash_series.append(round(max((depot_cash if depot_cash is not None else cash_now) + later_in, 0.0), 2))
 
         def index_at(day: str) -> int | None:
             pos = None
@@ -1128,17 +1135,12 @@ class Engine:
                 g = line_vals[n][li] - line_vals[i0][li] - inv
                 pid = f"{ln['isin']}:{ln['name']}" if ln["physical"] else ln["isin"]
                 positions[pid] = round(positions.get(pid, 0.0) + g, 2)
-            if exact_cash:
-                ext = sum(external[i0 + 1:])
-                start_total = rows[i0][1] + cash_series[i0]
-                gain = rows[n][1] + cash_series[n] - start_total - ext
-                base = start_total + max(ext, 0)
-                other = gain - sum(pillar_gain.values())  # Zinsen, Dividenden, Gebühren, Steuern
-            else:
-                ext = None
-                gain = rows[n][1] - rows[i0][1] - invested[0]
-                base = rows[i0][1] + max(invested[0], 0)
-                other = None
+            # Gewinn = Gewinn der Positionen (Wertänderung ohne Käufe/Verkäufe) + Erträge (Dividenden, Zinsen,
+            # Steuern) laut Zeitleiste. Ein-/Auszahlungen ändern nur das Cash, nie den Gewinn.
+            other = round(sum(income[i0 + 1:]), 2) if cash_events else None
+            ext = round(sum(external[i0 + 1:]), 2) if cash_events else None
+            gain = rows[n][1] - rows[i0][1] - invested[0] + (other or 0)
+            base = rows[i0][1] + max(invested[0], 0)
             periods[label] = {"from": rows[i0][0], "gain": round(gain, 2), "invested": round(invested[0], 2),
                               "deposits": round(ext, 2) if ext is not None else None,
                               "income": round(other, 2) if other is not None else None,
@@ -1160,7 +1162,8 @@ class Engine:
                  "price_source": self.state["market"].get(ln["isin"], {}).get("_candles_src", "tr"),
                  "first": min((t["date"] for t in ln["trades"]), default=None)} for li, ln in enumerate(lines)]
         return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events,
-                "cash": cash_series, "external": external, "exact_cash": exact_cash, "positions": info,
+                "cash": cash_series, "external": external, "income": income, "exact_cash": exact_cash,
+                "positions": info,
                 "history": all(ln["known"] for ln in lines if not ln["physical"]),
                 "complete": all(c["complete"] for c in coverage), "coverage": coverage,
                 "diag": self.state.get("timeline_diag") if mode == "depot" else None,
