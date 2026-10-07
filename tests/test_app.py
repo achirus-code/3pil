@@ -635,3 +635,38 @@ async def test_performance_real_depot_with_cash_events(make_engine, market, monk
     assert one_year["gain"] == pytest.approx(total(len(rows) - 1) - total(i0) - 1000.0, abs=0.05)
     assert one_year["positions"]["IE00B3YLTY66"] == pytest.approx(one_year["pillars"]["welt"], abs=0.05)
     assert one_year["income"] == pytest.approx(one_year["gain"] - one_year["pillars"]["welt"], abs=0.05)
+
+
+async def test_performance_includes_sold_positions(make_engine, market, monkeypatch):
+    """Komplett verkaufte Positionen gehören in den Verlauf – sonst fehlt ihr Wert vor dem Verkauf."""
+    async def portfolio(self):
+        return {"positions": {"IE00B3YLTY66": {"size": 100.0, "avg_buy": 10.5}}, "cash": 2000.0}
+
+    async def transactions(self, isins=None, max_pages=60):
+        assert isins is None  # alle ISINs, auch verkaufte
+        self.last_cash_events = [
+            {"date": "2026-02-01", "amount": 3000.0, "isin": None, "kind": "external", "type": "BANK_TRANSACTION_INCOMING"},
+            {"date": "2026-02-02", "amount": -1000.0, "isin": "IE00B3YLTY66", "kind": "trade", "type": "X"},
+            {"date": "2026-03-02", "amount": -1100.0, "isin": "DE000A0S9GB0", "kind": "trade", "type": "X"},
+            {"date": "2026-09-01", "amount": 1100.0, "isin": "DE000A0S9GB0", "kind": "trade", "type": "X"}]
+        return [{"id": "a", "isin": "IE00B3YLTY66", "time": "2026-02-02T10:00:00+00:00", "date": "2026-02-02",
+                 "amount": -1000.0, "shares": 100.0, "subtitle": "Kauforder"},
+                {"id": "g1", "isin": "DE000A0S9GB0", "time": "2026-03-02T10:00:00+00:00", "date": "2026-03-02",
+                 "amount": -1100.0, "shares": 10.0, "subtitle": "Kauforder"},
+                {"id": "g2", "isin": "DE000A0S9GB0", "time": "2026-09-01T10:00:00+00:00", "date": "2026-09-01",
+                 "amount": 1100.0, "shares": -10.0, "subtitle": "Verkaufsorder"}]
+
+    monkeypatch.setattr(TradeRepublic, "portfolio", portfolio)
+    monkeypatch.setattr(TradeRepublic, "transactions", transactions)
+    eng = await make_engine()
+    eng.tr.cookies = {"tr_session": "s"}
+    d = await eng.refresh()
+    perf = d["performance"]
+    assert perf["exact_cash"] and perf["complete"]
+    rows, cash = perf["series"], perf["cash"]
+    keys = perf["keys"]
+    mid = max(i for i, r in enumerate(rows) if r[0] < "2026-09-01")
+    assert rows[mid][2 + keys.index("gold")] > 0  # das verkaufte Gold war damals im Depot
+    assert min(cash) >= 0
+    sold = [p for p in perf["positions"] if p["sold"]]
+    assert [p["isin"] for p in sold] == ["DE000A0S9GB0"]

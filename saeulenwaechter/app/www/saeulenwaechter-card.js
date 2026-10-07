@@ -500,7 +500,8 @@ class SaeulenBase extends HTMLElement {
   }
 
   positionsTable(perf, cur, d) {
-    const list = (perf.positions || []).slice().sort((a, b) => b.value - a.value);
+    const list = (perf.positions || []).filter((p) => !p.sold || Math.abs((cur.positions || {})[p.isin] || 0) >= 1)
+      .sort((a, b) => b.value - a.value);
     if (!list.length) return "";
     const held = {};
     for (const p of Object.values(d.pillars)) for (const h of p.held || []) {
@@ -518,7 +519,7 @@ class SaeulenBase extends HTMLElement {
         const g = (cur.positions || {})[p.isin];
         const h = held[p.isin] || {};
         const total = h.cost ? h.value - h.cost : null;
-        return `<tr><td><i class="sq" style="background:${esc(colors[p.pillar] || "#888")}"></i>${esc(p.name)}<br><span class="muted">${esc(names[p.pillar] || "")}${p.first ? ` · seit ${new Date(p.first).toLocaleDateString("de-DE")}` : ""}</span></td>
+        return `<tr><td><i class="sq" style="background:${esc(colors[p.pillar] || "#888")}"></i>${esc(p.name)}<br><span class="muted">${esc(names[p.pillar] || "")}${p.sold ? " · verkauft" : ""}${p.first ? ` · seit ${new Date(p.first).toLocaleDateString("de-DE")}` : ""}</span></td>
           <td class="num">${eur(p.value, 0)}</td>
           <td class="num" style="color:${col(g)}">${signed(g)}</td>
           <td class="num" style="color:${col(total)}">${signed(total)}</td>
