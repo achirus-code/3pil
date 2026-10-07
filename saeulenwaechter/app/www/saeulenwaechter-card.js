@@ -518,10 +518,10 @@ class SaeulenBase extends HTMLElement {
         <div><span class="k">Seit Beginn${at.since ? ` (${new Date(at.since).toLocaleDateString("de-DE")})` : ""} · exakt aus den Buchungen</span>
           <b class="num" style="color:${col(at.gain)}">${signed(at.gain)}</b>${at.pct != null ? ` <span class="num" style="color:${col(at.gain)}">${pct(at.pct, 2)}</span>` : ""}</div>
         <div class="parts">
-          <span>Kursgewinne (realisiert + offen, nach Gebühren) <b class="num" style="color:${col(at.trading)}">${signed(at.trading)}</b></span>
+          <span>Kursgewinne (realisiert + offen, nach Gebühren, vor Steuern) <b class="num" style="color:${col(at.trading)}">${signed(at.trading)}</b></span>
           <span>Dividenden <b class="num">${signed(at.dividends)}</b></span>
           <span>Zinsen <b class="num">${signed(at.interest)}</b></span>
-          <span>Steuern/Erstattungen <b class="num">${signed(at.taxes)}</b></span>
+          <span>Steuern netto <b class="num" style="color:${col(at.taxes)}">${signed(at.taxes)}</b>${at.tax_paid ? ` (gezahlt ${eur(at.tax_paid, 0)}, erstattet ${eur(at.taxes + at.tax_paid, 0)})` : ""}</span>
 
           ${at.physical_gold != null ? `<span>physisches Gold <b class="num" style="color:${col(at.physical_gold)}">${signed(at.physical_gold)}</b> (nicht bei TR)</span>` : ""}
         </div>

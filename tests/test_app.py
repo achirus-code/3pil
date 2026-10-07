@@ -641,6 +641,12 @@ async def test_performance_real_depot_with_cash_events(make_engine, market, monk
     assert at["gain"] == pytest.approx(securities + 500 - 1000, abs=0.05)
     assert at["interest"] == 5.0 and at["without_interest"] == pytest.approx(at["gain"] - 5.0)
     assert at["trading"] == pytest.approx(at["gain"] - 5.0, abs=0.05)
+    # beim Verkauf einbehaltene Steuer zählt als Steuer (netto negativ), Kursgewinn davor entsprechend höher
+    eng.state["trades"][1]["tax"] = 20.0
+    d = await eng.refresh()
+    at = d["performance"]["all_time"]
+    assert at["taxes"] == -20.0 and at["tax_paid"] == 20.0
+    assert at["trading"] == pytest.approx(at["gain"] - 5.0 + 20.0, abs=0.05)
 
 
 async def test_performance_includes_sold_positions(make_engine, market, monkeypatch):

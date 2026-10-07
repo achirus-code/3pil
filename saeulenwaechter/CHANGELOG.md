@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.1
+
+- Steuern netto: Die beim Verkauf einbehaltene Steuer (Zeile „Steuer“ in den Transaktionsdetails) zählt jetzt als Steuer, Erstattungen und Korrekturen werden gegengerechnet. Vorher enthielt „Steuern“ nur Erstattungen – der Haken „Steuern einrechnen“ erhöhte deshalb den Gewinn. Kursgewinne werden vor Steuern ausgewiesen.
+
 ## 2.12.0
 
 - „Seit Beginn“ exakt aus den Buchungen: heutiger Wert bei Trade Republic (Wertpapiere + Cash) − eingezahltes Geld, aufgeteilt in Kursgewinne, Dividenden, Zinsen und Steuern; dazu „ohne Zinsen“ zum Vergleich mit der TR-App. Physisches Gold separat.
