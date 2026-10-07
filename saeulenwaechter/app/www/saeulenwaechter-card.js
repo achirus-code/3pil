@@ -86,6 +86,10 @@ const STYLE = `
   .interest .muted { opacity:.7; }
   .muted { color:var(--secondary-text-color); font-weight:normal; }
   button.sw.small { padding:4px 10px; font-size:12px; }
+  .loading { height:6px; border-radius:3px; background:var(--divider-color); overflow:hidden; margin:18px 0 8px; }
+  .loading .bar-ind { height:100%; width:35%; border-radius:3px; background:var(--primary-color);
+                      animation:sw-load 1.1s ease-in-out infinite; }
+  @keyframes sw-load { 0% { margin-left:-35%; } 100% { margin-left:100%; } }
   .modal { position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.55); display:flex; align-items:flex-start; justify-content:center;
            padding:40px 12px; overflow-y:auto; }
   .modal-box { position:relative; width:min(860px, 100%); background:var(--card-background-color, #1c1c1e); color:var(--primary-text-color);
@@ -430,13 +434,37 @@ class SaeulenBase extends HTMLElement {
       ${this.interestLine(st.interest)}
       ${this.reconcileLine(d.reconcile)}
       <div class="note">Gewinn/Verlust der offenen Positionen zum Geldkurs; Säulen in Cash ohne Gewinn/Verlust.</div>
-      ${d.performance && d.performance.series && d.performance.series.length > 1
+      ${d.performance_available
         ? `<div style="margin-top:10px"><button class="sw small" data-perf-open>📈 Wertentwicklung</button></div>` : this.history(d)}
       ${this._perfOpen ? this.perfModal(d) : ""}
     </div>`;
   }
 
+  async _loadPerf() {
+    if (this._perfLoading) return;
+    this._perfLoading = true;
+    this._perfError = null;
+    this._render();
+    try {
+      this._perf = await this._hass.callWS({ type: "saeulenwaechter/performance" });
+      this._perfAt = Date.now();
+    } catch (e) {
+      this._perfError = e.message || String(e);
+    }
+    this._perfLoading = false;
+    this._render();
+  }
+
   perfModal(d) {
+    if (!this._perf || this._perfLoading) {
+      return `<div class="modal" data-perf-close><div class="modal-box" role="dialog" aria-label="Wertentwicklung">
+        <button class="modal-x" data-perf-close aria-label="Schließen">✕</button>
+        <div class="label">Wertentwicklung</div>
+        ${this._perfError ? `<div class="err">${esc(this._perfError)}</div>`
+          : `<div class="loading"><div class="bar-ind"></div></div><div class="note">Kursverläufe und Buchungen werden ausgewertet …</div>`}
+      </div></div>`;
+    }
+    d = { ...d, performance: this._perf };
     const perf = d.performance || {};
     const cov = (perf.coverage || []).filter((c) => !c.complete);
     const quality = perf.complete
@@ -797,7 +825,12 @@ Soll eine Position mitzählen: ISIN in den Optionen unter „Weitere ISINs …�
         this._render();
       }));
     const open = this.shadowRoot.querySelector("[data-perf-open]");
-    if (open) open.addEventListener("click", (e) => { e.stopPropagation(); this._perfOpen = true; this._render(); });
+    if (open) open.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._perfOpen = true;
+      // einmal laden, danach höchstens alle 5 Minuten neu
+      if (!this._perf || Date.now() - (this._perfAt || 0) > 300000) this._loadPerf(); else this._render();
+    });
     this.shadowRoot.querySelectorAll("[data-perf-close]").forEach((el) =>
       el.addEventListener("click", (e) => { if (e.target === el) { this._perfOpen = false; this._render(); } }));
     if (!this._escBound) {
