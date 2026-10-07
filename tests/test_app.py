@@ -635,6 +635,12 @@ async def test_performance_real_depot_with_cash_events(make_engine, market, monk
     assert one_year["gain"] == pytest.approx(total(len(rows) - 1) - total(i0) - 1000.0, abs=0.05)
     assert one_year["positions"]["IE00B3YLTY66"] == pytest.approx(one_year["pillars"]["welt"], abs=0.05)
     assert one_year["income"] == pytest.approx(one_year["gain"] - one_year["pillars"]["welt"], abs=0.05)
+    # seit Beginn exakt: Wertpapiere + Cash − Einzahlungen
+    at = perf["all_time"]
+    securities = d["pillars"]["welt"]["value"]
+    assert at["gain"] == pytest.approx(securities + 500 - 1000, abs=0.05)
+    assert at["interest"] == 5.0 and at["without_interest"] == pytest.approx(at["gain"] - 5.0)
+    assert at["trading"] == pytest.approx(at["gain"] - 5.0, abs=0.05)
 
 
 async def test_performance_includes_sold_positions(make_engine, market, monkeypatch):
