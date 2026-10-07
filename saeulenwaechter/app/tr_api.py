@@ -323,9 +323,25 @@ class TradeRepublic:
         if items:
             diag["item_keys"] = sorted({k for it in items[:50] for k in it})[:30]
         trades = []
+        # Alle Geldbewegungen (für den Cash-Verlauf): Handel, Erträge (Dividende, Zinsen, Steuern) und
+        # Ein-/Auszahlungen (alles andere, z. B. Überweisung, Karte)
+        self.last_cash_events = cash_events = []
+        types: dict[str, int] = {}
         for it in items:
             isin = _isin_from_icon(it.get("icon")) or _isin_from_icon(it.get("action")) \
                 or _isin_from_icon(it.get("instrumentId") or it.get("isin"))
+            etype = str(it.get("eventType") or it.get("type") or "?")
+            types[etype] = types.get(etype, 0) + 1
+            amount = _f(_amount(it.get("amount")))
+            status = str(it.get("status") or "").upper()
+            if amount and status not in ("CANCELED", "CANCELLED", "FAILED", "PENDING", "REJECTED") \
+                    and not it.get("deleted"):
+                try:
+                    day = datetime.fromisoformat(str(it["timestamp"]).replace("Z", "+00:00")).date().isoformat()
+                    cash_events.append({"date": day, "amount": amount, "isin": isin,
+                                        "kind": classify_cash(it, isin), "type": etype})
+                except (KeyError, ValueError):
+                    pass
             if isin:
                 diag["with_isin"] += 1
             if not isin or (isins is not None and isin not in isins):
@@ -397,6 +413,8 @@ class TradeRepublic:
                 diag["estimated"] += 1
                 kept.append(t)
         trades = kept
+        diag["event_types"] = dict(sorted(types.items(), key=lambda kv: -kv[1])[:25])
+        diag["cash_kinds"] = {k: sum(1 for e in cash_events if e["kind"] == k) for k in ("trade", "income", "external")}
         _LOGGER.info("TR-Zeitleiste: %s", {k: v for k, v in diag.items()})
         for t in trades:
             _LOGGER.info("TR-Transaktion %s %s: %s %s Stück, %s €", t["date"], t["isin"], t["subtitle"] or t["type"],
@@ -593,6 +611,21 @@ TRADE_WORDS = ("kauf", "order", "sparplan", "savings", "saveback", "round", "spa
 NOT_TRADES = ("dividend", "ausschüttung", "ausschuettung", "zinsen", "interest", "steuer", "tax", "coupon", "kupon",
               "ertrag", "distribution", "corporate_action", "kapitalmaßnahme")
 SHARE_TITLES = ("aktien", "anteile", "stück", "stueck", "shares", "anzahl", "menge")
+
+
+INCOME_WORDS = ("dividend", "ausschüttung", "ausschuettung", "zinsen", "interest", "saveback", "coupon", "kupon",
+                "ertrag", "steuer", "tax", "prämie", "bonus", "corporate_action", "kapitalmaßnahme")
+
+
+def classify_cash(it: dict, isin: str | None) -> str:
+    """Art einer Geldbewegung: „trade“ (Kauf/Verkauf), „income“ (zählt zum Gewinn) oder „external“
+    (Ein-/Auszahlung, Karte, Überweisung – zählt nicht zum Gewinn)."""
+    label = f"{it.get('subtitle') or ''} {it.get('eventType') or it.get('type') or ''} {it.get('title') or ''}".lower()
+    if it.get("dividend") or any(w in label for w in INCOME_WORDS):
+        return "income"
+    if isin:
+        return "trade"
+    return "external"
 
 
 def _isin_from_icon(icon: Any) -> str | None:
