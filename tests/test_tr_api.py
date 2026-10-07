@@ -255,3 +255,14 @@ async def test_cash_events_hidden_duplicates_and_kinds():
     assert kinds == [("2026-01-02", 1000.0, "external"), ("2026-01-03", 3.5, "income"), ("2026-01-05", 12.0, "income")]
     assert tr.last_timeline["duplicates"] == 1
     assert tr.last_timeline["event_types"]["BANK_TRANSACTION_OUTGOING"]["hidden"] == 1
+
+
+def test_find_tax():
+    from sw.tr_api import find_tax
+    sell = {"sections": [{"title": "Übersicht", "data": [
+        {"title": "Transaktion", "detail": {"text": "100 × 12,00 €"}},
+        {"title": "Steuer", "detail": {"text": "−52,75 €"}},
+        {"title": "Gebühr", "detail": {"text": "1,00 €"}}]}]}
+    assert find_tax(sell) == 52.75
+    assert find_tax({"data": [{"title": "Steuer", "detail": {"text": "+10,00 €"}}]}) == -10.0  # Erstattung
+    assert find_tax({"data": [{"title": "Gebühr", "detail": {"text": "1,00 €"}}]}) == 0

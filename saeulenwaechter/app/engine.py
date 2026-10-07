@@ -1123,7 +1123,9 @@ class Engine:
             day_inc = [e for e in ev if e["kind"] == "income" and prev < e["date"] <= r[0]]
             income[i] = round(sum(e["amount"] for e in day_inc), 2)
             interest[i] = round(sum(e["amount"] for e in day_inc if "INTEREST" in str(e.get("type") or "").upper()), 2)
-            taxes[i] = round(sum(e["amount"] for e in day_inc if "TAX" in str(e.get("type") or "").upper()), 2)
+            # Steuern netto: Erstattungen/Korrekturen − beim Verkauf einbehaltene Steuer
+            paid = sum(t.get("tax") or 0 for t in all_trades if prev < t["date"] <= r[0])
+            taxes[i] = round(sum(e["amount"] for e in day_inc if "TAX" in str(e.get("type") or "").upper()) - paid, 2)
         cash_series = []
         if exact_cash:
             for r in rows:
@@ -1195,12 +1197,13 @@ class Engine:
                 "history": all(ln["known"] for ln in lines if not ln["physical"] and not ln["sold"]),
                 "complete": all(c["complete"] for c in coverage), "coverage": coverage,
                 "diag": self.state.get("timeline_diag") if mode == "depot" else None,
-                "all_time": self._all_time(groups, cash_events, depot_cash) if exact_cash or cash_events else None,
+                "all_time": self._all_time(groups, cash_events, depot_cash, all_trades) if cash_events else None,
                 "missing_prices": missing_prices,
                 "synced_trades_at": self.state.get("trades_at") if mode == "depot" else None}
 
     @staticmethod
-    def _all_time(groups: dict, cash_events: list[dict], depot_cash: float | None) -> dict | None:
+    def _all_time(groups: dict, cash_events: list[dict], depot_cash: float | None,
+                  trades: list[dict] | None = None) -> dict | None:
         """Gewinn seit Kontoeröffnung, exakt aus den Buchungen – ohne Kursverläufe:
         heutiger Wert bei Trade Republic (Wertpapiere + Cash) − eingezahltes Geld. Aufgeteilt in Zinsen, Dividenden,
         Steuern und den Rest (Kursgewinne realisiert und offen, nach Gebühren). Physisches Gold separat."""
@@ -1216,13 +1219,14 @@ class Engine:
                        and any(w in str(e.get("type") or "").upper() for w in words))
         interest = income("INTEREST")
         dividends = income("CORPORATE_ACTION", "CREDIT", "DIVIDEND")
-        taxes = income("TAX")
+        tax_paid = sum(t.get("tax") or 0 for t in trades or [])
+        taxes = income("TAX") - tax_paid  # netto: Erstattungen − beim Verkauf einbehaltene Steuer
         physical = [h for hs in groups.values() for h in hs if h.get("physical")]
         gold = sum((h.get("value") or 0) - (h.get("cost") or 0) for h in physical) if physical else None
-        trading = gain - interest - dividends - taxes
+        trading = gain - interest - dividends - taxes  # Kursgewinne vor Steuern
         return {"gain": round(gain, 2), "securities": round(securities, 2), "cash": round(depot_cash, 2),
                 "deposits": round(deposits, 2), "interest": round(interest, 2), "dividends": round(dividends, 2),
-                "taxes": round(taxes, 2), "trading": round(trading, 2),
+                "taxes": round(taxes, 2), "tax_paid": round(tax_paid, 2), "trading": round(trading, 2),
                 "without_interest": round(gain - interest, 2),
                 "pct": gain / deposits if deposits > 0 else None,
                 "physical_gold": round(gold, 2) if gold is not None else None,

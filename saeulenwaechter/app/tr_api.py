@@ -394,6 +394,7 @@ class TradeRepublic:
                 if any(w in json.dumps(detail, ensure_ascii=False).lower() for w in ("dividende", "ausschüttung")):
                     t["skip"] = True
                     continue
+                t["tax"] = find_tax(detail)  # beim Verkauf einbehaltene Steuer (steckt im Erlös)
                 shares = find_shares(detail)
                 if shares is not None:
                     text = f"{t['subtitle'] or ''} {t['type'] or ''}".lower()
@@ -435,8 +436,8 @@ class TradeRepublic:
         diag["cash_kinds"] = {k: sum(1 for e in cash_events if e["kind"] == k) for k in ("trade", "income", "external")}
         _LOGGER.info("TR-Zeitleiste: %s", {k: v for k, v in diag.items()})
         for t in trades:
-            _LOGGER.info("TR-Transaktion %s %s: %s %s Stück, %s €", t["date"], t["isin"], t["subtitle"] or t["type"],
-                         t["shares"], t["amount"])
+            _LOGGER.info("TR-Transaktion %s %s: %s %s Stück, %s €, Steuer %s €", t["date"], t["isin"],
+                         t["subtitle"] or t["type"], t["shares"], t["amount"], t.get("tax"))
         return trades
 
     async def logout(self) -> None:
@@ -717,6 +718,22 @@ def _titles(body: Any, depth: int = 0) -> list[str]:
         for v in body:
             out.extend(_titles(v, depth + 1))
     return out
+
+
+TAX_TITLES = ("steuer", "steuern", "kapitalertragsteuer", "kapitalertragssteuer", "solidaritätszuschlag",
+              "kirchensteuer", "tax", "taxes")
+
+
+def find_tax(body: Any) -> float:
+    """Einbehaltene Steuer einer Transaktion (positiv = gezahlt, negativ = erstattet), aus Zeilen „Steuer“ usw."""
+    total = 0.0
+    for title, text in _rows(body):
+        if title.strip().lower() in TAX_TITLES:
+            n = _de_number(text)
+            if n:
+                # „−12,34 €“: abgezogen = gezahlt; „+12,34 €“ in einer Steuerzeile beim Kauf/Verkauf = Erstattung
+                total += abs(n) if ("-" in text or "−" in text or not text.strip().startswith("+")) else -abs(n)
+    return round(total, 2)
 
 
 def find_shares(body: Any) -> float | None:
