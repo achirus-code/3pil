@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.0
+
+- „Seit Beginn“ exakt aus den Buchungen: heutiger Wert bei Trade Republic (Wertpapiere + Cash) − eingezahltes Geld, aufgeteilt in Kursgewinne, Dividenden, Zinsen und Steuern; dazu „ohne Zinsen“ zum Vergleich mit der TR-App. Physisches Gold separat.
+- Hinweis, wenn für eine Position kein Kursverlauf vorliegt; „Max.“ heißt jetzt „Alle Kurse“ (reicht nur so weit zurück wie die Tageskurse).
+
 ## 2.11.2
 
 - Komplett verkaufte Positionen gehören jetzt in den Verlauf: vor dem Verkauf zählt ihr Wert, ihr Gewinn bis zum Verkauf geht in den Gewinn ein. Vorher erschien nur der Verkaufserlös als Cash – das Depot sah in der Vergangenheit zu klein aus und der Cash-Verlauf wurde verworfen.

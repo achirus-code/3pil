@@ -1020,6 +1020,7 @@ class Engine:
                 groups.setdefault(key, []).append({"isin": isin, "name": self._name(isin), "size": 0.0, "value": 0.0,
                                                    "cost": None, "sold": True, "counts_as": counts_as})
         lines = []
+        missing_prices: list[str] = []
         for key, hs in groups.items():
             for h in hs:
                 series = closes(GOLD_ISIN if h.get("physical") else h["isin"])
@@ -1031,6 +1032,8 @@ class Engine:
                     if anchor and anchor[-1]:
                         factor = first_close / anchor[-1]
                         series = [(d, c * factor) for d, c in ref_series if d < first_day] + series
+                if not series and (h.get("size") or h.get("sold")):
+                    missing_prices.append(h["name"])
                 if not series or h.get("value") is None or (not h.get("size") and not h.get("sold")):
                     continue
                 share = h.get("share") or 1.0
@@ -1185,7 +1188,38 @@ class Engine:
                 "history": all(ln["known"] for ln in lines if not ln["physical"] and not ln["sold"]),
                 "complete": all(c["complete"] for c in coverage), "coverage": coverage,
                 "diag": self.state.get("timeline_diag") if mode == "depot" else None,
+                "all_time": self._all_time(groups, cash_events, depot_cash) if exact_cash or cash_events else None,
+                "missing_prices": missing_prices,
                 "synced_trades_at": self.state.get("trades_at") if mode == "depot" else None}
+
+    @staticmethod
+    def _all_time(groups: dict, cash_events: list[dict], depot_cash: float | None) -> dict | None:
+        """Gewinn seit Kontoeröffnung, exakt aus den Buchungen – ohne Kursverläufe:
+        heutiger Wert bei Trade Republic (Wertpapiere + Cash) − eingezahltes Geld. Aufgeteilt in Zinsen, Dividenden,
+        Steuern und den Rest (Kursgewinne realisiert und offen, nach Gebühren). Physisches Gold separat."""
+        if not cash_events or depot_cash is None:
+            return None
+        securities = sum(h.get("value") or 0 for hs in groups.values() for h in hs
+                         if not h.get("physical") and not h.get("sold"))
+        deposits = sum(e["amount"] for e in cash_events if e["kind"] == "external")
+        gain = securities + depot_cash - deposits
+
+        def income(*words: str) -> float:
+            return sum(e["amount"] for e in cash_events if e["kind"] == "income"
+                       and any(w in str(e.get("type") or "").upper() for w in words))
+        interest = income("INTEREST")
+        dividends = income("CORPORATE_ACTION", "CREDIT", "DIVIDEND")
+        taxes = income("TAX")
+        physical = [h for hs in groups.values() for h in hs if h.get("physical")]
+        gold = sum((h.get("value") or 0) - (h.get("cost") or 0) for h in physical) if physical else None
+        trading = gain - interest - dividends - taxes
+        return {"gain": round(gain, 2), "securities": round(securities, 2), "cash": round(depot_cash, 2),
+                "deposits": round(deposits, 2), "interest": round(interest, 2), "dividends": round(dividends, 2),
+                "taxes": round(taxes, 2), "trading": round(trading, 2),
+                "without_interest": round(gain - interest, 2),
+                "pct": gain / deposits if deposits > 0 else None,
+                "physical_gold": round(gold, 2) if gold is not None else None,
+                "since": min((e["date"] for e in cash_events), default=None)}
 
     @staticmethod
     def _reconcile(depot: dict, holdings: dict, unassigned: list[dict]) -> dict | None:

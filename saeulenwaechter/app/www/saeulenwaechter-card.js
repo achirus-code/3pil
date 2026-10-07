@@ -94,6 +94,10 @@ const STYLE = `
   .modal-box > .label:first-of-type { margin-top:0 !important; }
   .note.ok { color:var(--sw-green); }
   pre.diag { font-size:11px; white-space:pre-wrap; user-select:text; max-height:240px; overflow:auto; }
+  .alltime { padding:10px 12px; border-radius:10px; background:rgba(127,127,127,.1); margin:6px 0 10px; }
+  .alltime > div:first-child { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .alltime b.num { font-size:20px; }
+  .alltime .parts b.num { font-size:inherit; }
   .pos-table { margin-top:10px; }
   .pos-table td { vertical-align:top; }
   .pos-table i.sq { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; }
@@ -448,7 +452,7 @@ class SaeulenBase extends HTMLElement {
     const perf = d.performance;
     if (!perf || !perf.series || perf.series.length < 2) return this.history(d);
     const LABELS = { "1W": "1 Woche", "1M": "1 Monat", "3M": "3 Monate", "6M": "6 Monate", YTD: "Seit 1.1.",
-                     "1J": "1 Jahr", "3J": "3 Jahre", "5J": "5 Jahre", MAX: "Max." };
+                     "1J": "1 Jahr", "3J": "3 Jahre", "5J": "5 Jahre", MAX: "Alle Kurse" };
     const avail = Object.keys(LABELS).filter((k) => perf.periods[k]);
     let sel = this._period && perf.periods[this._period] ? this._period : (perf.periods["1M"] ? "1M" : avail[0]);
     this._period = sel;
@@ -488,8 +492,25 @@ class SaeulenBase extends HTMLElement {
       : d.mode === "depot"
         ? "<b>Ohne Kaufhistorie</b> – mit den heutigen Stückzahlen gerechnet. Einmal „Neu synchronisieren“, dann liest die App deine Käufe und Verkäufe"
         : "Papierdepot ab Einstieg";
+    const at = perf.all_time;
+    const allTime = at ? `<div class="alltime">
+        <div><span class="k">Seit Beginn${at.since ? ` (${new Date(at.since).toLocaleDateString("de-DE")})` : ""} · exakt aus den Buchungen</span>
+          <b class="num" style="color:${col(at.gain)}">${signed(at.gain)}</b>${at.pct != null ? ` <span class="num" style="color:${col(at.gain)}">${pct(at.pct, 2)}</span>` : ""}</div>
+        <div class="parts">
+          <span>Kursgewinne (realisiert + offen, nach Gebühren) <b class="num" style="color:${col(at.trading)}">${signed(at.trading)}</b></span>
+          <span>Dividenden <b class="num">${signed(at.dividends)}</b></span>
+          <span>Zinsen <b class="num">${signed(at.interest)}</b></span>
+          <span>Steuern/Erstattungen <b class="num">${signed(at.taxes)}</b></span>
+          <span><b>ohne Zinsen <span class="num" style="color:${col(at.without_interest)}">${signed(at.without_interest)}</span></b> (vergleichbar mit TR)</span>
+          ${at.physical_gold != null ? `<span>physisches Gold <b class="num" style="color:${col(at.physical_gold)}">${signed(at.physical_gold)}</b> (nicht bei TR)</span>` : ""}
+        </div>
+        <div class="note">Heutiger Wert bei Trade Republic ${eur(at.securities + at.cash, 0)} (Wertpapiere ${eur(at.securities, 0)} + Cash ${eur(at.cash, 0)}) − eingezahlt ${eur(at.deposits, 0)}.</div>
+      </div>` : "";
+    const miss = (perf.missing_prices || []).length
+      ? `<div class="note warn">Ohne Kursverlauf (fehlen in den Zeiträumen): ${perf.missing_prices.map(esc).join(", ")}</div>` : "";
     return `<div class="label" style="margin-top:12px">Wertentwicklung</div>
-      <div class="periods">${chips}</div>
+      ${allTime}
+      <div class="periods">${chips}</div>${miss}
       <div class="parts" style="margin:2px 0 4px">${split}${splitCash}${inv ? `<span>· ${inv}</span>` : ""}</div>
       ${perf.complete ? "" : `<div class="note warn">≈ Kaufhistorie unvollständig – die Gewinne sind eine Annahme mit den heutigen Stückzahlen (Details unten).</div>`}
       ${this.chart(rows)}
