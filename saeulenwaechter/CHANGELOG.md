@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.3
+
+- Nach einem Neustart (z. B. Update) sofort Daten aus dem gespeicherten Stand statt „Säulenwächter hat noch keine Daten“; die aktuellen Kurse werden im Hintergrund geladen.
+
 ## 2.12.2
 
 - Positionstabelle in der Wertentwicklung sortierbar (Position, Wert, Im Zeitraum, Seit Kauf – Klick auf die Überschrift, erneut für umgekehrt).
