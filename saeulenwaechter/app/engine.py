@@ -466,6 +466,8 @@ class Engine:
                      synced_at=snap.get("synced_at"), connected=True)
         # Kurse für Positionen außerhalb der Säulen-Instrumente (öffentliche Kursdaten, kein Login nötig)
         extra = [i for i in depot["positions"] if i not in _all_isins()]
+        # verkaufte Positionen aus der Zeitleiste brauchen ebenfalls Kurse (Verlauf vor dem Verkauf)
+        extra += [i for i in self._sold_isins(depot) if i not in _all_isins() and i not in extra]
         if extra:
             try:
                 res = await self.tr.market_data(extra, EXCHANGE, candles=False,
@@ -491,6 +493,11 @@ class Engine:
         await self._yahoo_fallback(depot)
         return depot
 
+    def _sold_isins(self, depot: dict) -> list[str]:
+        """ISINs mit Käufen/Verkäufen in der Zeitleiste, die heute nicht mehr im Depot sind."""
+        held = set(depot.get("positions") or {})
+        return sorted({t["isin"] for t in self.state.get("trades", []) if t["isin"] not in held})
+
     async def _yahoo_fallback(self, depot: dict) -> None:
         """Fehlen bei Trade Republic Tageskurse für eine Position oder beginnen sie erst nach dem ersten Kauf,
         werden sie (einmal am Tag) von Yahoo Finance geholt."""
@@ -498,7 +505,7 @@ class Engine:
         first_trade = {}
         for t in self.state.get("trades", []):
             first_trade[t["isin"]] = min(first_trade.get(t["isin"], t["date"]), t["date"])
-        for isin in depot.get("positions") or {}:
+        for isin in [*(depot.get("positions") or {}), *self._sold_isins(depot)]:
             m = self.state["market"].setdefault(isin, {})
             candles = m.get("candles") or []
             first = (datetime.fromtimestamp(candles[0]["time"] / 1000, timezone.utc).date().isoformat()
@@ -531,7 +538,8 @@ class Engine:
                                         "synced_at": self.now().isoformat()}
         self.state["sent"].pop("auth", None)
         try:  # Käufe und Verkäufe der gehaltenen Positionen (für Haltedauer und echten Verlauf)
-            trades = await self.tr.transactions(isins=set(p["positions"]))
+            # alle Käufe/Verkäufe – auch von inzwischen verkauften Positionen (für den echten Verlauf)
+            trades = await self.tr.transactions(isins=None)
             # jedes Mal komplett neu (frühere Fehldeutungen, z. B. Dividenden, fallen so wieder heraus)
             self.state["trades"] = sorted(trades, key=lambda t: t["time"])
             self.state["timeline_diag"] = getattr(self.tr, "last_timeline", None)
@@ -1001,6 +1009,16 @@ class Engine:
         if mode == "depot" and unassigned:
             groups["other"] = [{"isin": u["isin"], "name": u["name"], "size": u.get("size"), "value": u.get("value"),
                                 "cost": None} for u in unassigned if u.get("value") is not None]
+        if mode == "depot":
+            # komplett verkaufte Positionen: heute 0 Stück, davor aus den Verkäufen zurückgerechnet
+            held_now = {h["isin"] for hs in groups.values() for h in hs}
+            for isin in sorted({t["isin"] for t in all_trades} - held_now):
+                counts_as = S.resolve_isin(isin, PILLARS, self.extra_isins)
+                key = next((k for k, p in self.state["pillars"].items()
+                            if counts_as and counts_as in _candidates(next(c for c in PILLARS if c["key"] == k))), None)
+                key = key if key in holdings else "other"
+                groups.setdefault(key, []).append({"isin": isin, "name": self._name(isin), "size": 0.0, "value": 0.0,
+                                                   "cost": None, "sold": True, "counts_as": counts_as})
         lines = []
         for key, hs in groups.items():
             for h in hs:
@@ -1013,7 +1031,7 @@ class Engine:
                     if anchor and anchor[-1]:
                         factor = first_close / anchor[-1]
                         series = [(d, c * factor) for d, c in ref_series if d < first_day] + series
-                if not series or not h.get("size") or h.get("value") is None:
+                if not series or h.get("value") is None or (not h.get("size") and not h.get("sold")):
                     continue
                 share = h.get("share") or 1.0
                 if h.get("physical"):
@@ -1028,7 +1046,7 @@ class Engine:
                               for t in all_trades if t["isin"] == h["isin"]]
                 lines.append({"key": key, "isin": h["isin"], "name": h["name"], "size": h["size"],
                               "series": series, "trades": trades, "known": bool(trades),
-                              "physical": bool(h.get("physical"))})
+                              "physical": bool(h.get("physical")), "sold": bool(h.get("sold"))})
         if not lines:
             return None
 
@@ -1053,7 +1071,7 @@ class Engine:
                 return first_series
             first_trade = min(t["date"] for t in ln["trades"])
             return first_series if first_series > first_trade else None
-        constraints = [c for c in (needs_from(ln) for ln in lines) if c]
+        constraints = [c for c in (needs_from(ln) for ln in lines if not ln["sold"]) if c]
         start = max(constraints) if constraints else min(ln["series"][0][0] for ln in lines)
         days = sorted({d for ln in lines for d, _ in ln["series"] if d >= start})
         if not days:
@@ -1150,7 +1168,7 @@ class Engine:
                          for ln in lines for t in ln["trades"] if t["date"] >= rows[0][0] and not ln["physical"]),
                         key=lambda e: e["date"])
         coverage = []
-        for ln in lines:
+        for ln in [ln for ln in lines if not ln["sold"]]:
             explained = sum(t["shares"] for t in ln["trades"])
             missing = ln["size"] - explained
             coverage.append({"name": ln["name"], "isin": ln["isin"], "size": round(ln["size"], 4),
@@ -1159,12 +1177,12 @@ class Engine:
                              "first": min((t["date"] for t in ln["trades"]), default=None)})
         info = [{"isin": f"{ln['isin']}:{ln['name']}" if ln["physical"] else ln["isin"], "name": ln["name"], "pillar": ln["key"], "size": round(ln["size"], 4),
                  "value": round(line_vals[-1][li], 2),
-                 "price_source": self.state["market"].get(ln["isin"], {}).get("_candles_src", "tr"),
+                 "price_source": self.state["market"].get(ln["isin"], {}).get("_candles_src", "tr"), "sold": ln["sold"],
                  "first": min((t["date"] for t in ln["trades"]), default=None)} for li, ln in enumerate(lines)]
         return {"periods": periods, "keys": keys, "series": rows, "flows": flows, "events": events,
                 "cash": cash_series, "external": external, "income": income, "exact_cash": exact_cash,
                 "positions": info,
-                "history": all(ln["known"] for ln in lines if not ln["physical"]),
+                "history": all(ln["known"] for ln in lines if not ln["physical"] and not ln["sold"]),
                 "complete": all(c["complete"] for c in coverage), "coverage": coverage,
                 "diag": self.state.get("timeline_diag") if mode == "depot" else None,
                 "synced_trades_at": self.state.get("trades_at") if mode == "depot" else None}

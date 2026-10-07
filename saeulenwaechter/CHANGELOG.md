@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.2
+
+- Komplett verkaufte Positionen gehören jetzt in den Verlauf: vor dem Verkauf zählt ihr Wert, ihr Gewinn bis zum Verkauf geht in den Gewinn ein. Vorher erschien nur der Verkaufserlös als Cash – das Depot sah in der Vergangenheit zu klein aus und der Cash-Verlauf wurde verworfen.
+- Dafür liest die App alle Käufe/Verkäufe der Zeitleiste und holt Kurse auch für verkaufte Wertpapiere.
+
 ## 2.11.1
 
 - Gewinn korrigiert: Gewinn = Wertänderung der Positionen ohne Käufe/Verkäufe plus Dividenden, Zinsen und Steuern. Ein- und Auszahlungen (und Fehler im Cash-Verlauf) können den Gewinn nicht mehr verfälschen – vorher erschienen z. B. +40.884 € als „Zinsen, Dividenden“.
