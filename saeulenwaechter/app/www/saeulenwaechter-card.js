@@ -97,6 +97,11 @@ const STYLE = `
   .modal-x { position:absolute; top:10px; right:10px; border:0; background:transparent; color:var(--secondary-text-color); font-size:18px; cursor:pointer; }
   .modal-box > .label:first-of-type { margin-top:0 !important; }
   .note.ok { color:var(--sw-green); }
+  .risk { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin:8px 0 2px; }
+  .risk > div { border:1px solid var(--divider-color); border-radius:8px; padding:6px 10px; display:flex; flex-direction:column; }
+  .risk .k { font-size:11px; color:var(--secondary-text-color); }
+  .risk b { font-size:16px; }
+  .risk .s { font-size:10px; color:var(--secondary-text-color); }
   pre.diag { font-size:11px; white-space:pre-wrap; user-select:text; max-height:240px; overflow:auto; }
   .toggles { display:flex; gap:16px; font-size:12px; color:var(--secondary-text-color); margin:2px 0 6px; flex-wrap:wrap; }
   .toggles input { vertical-align:-2px; margin-right:4px; }
@@ -455,6 +460,33 @@ class SaeulenBase extends HTMLElement {
     this._render();
   }
 
+  // Zeitgewichtete Kennzahlen der Wertpapiere: Tagesrendite ohne Käufe/Verkäufe (r = (Wert − Zufluss) / Vortag − 1)
+  riskStats(rows, flows) {
+    const idx = [1];
+    const rets = [];
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1][1], f = (flows[i] || [0])[0] || 0;
+      if (prev <= 0) { idx.push(idx[idx.length - 1]); continue; }
+      const r = (rows[i][1] - f) / prev - 1;
+      rets.push(r);
+      idx.push(idx[idx.length - 1] * (1 + r));
+    }
+    if (rets.length < 5) return "";
+    const days = (new Date(rows[rows.length - 1][0]) - new Date(rows[0][0])) / 86400000;
+    const total = idx[idx.length - 1] - 1;
+    const cagr = days >= 365 ? Math.pow(1 + total, 365 / days) - 1 : null;
+    const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+    const vol = Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / (rets.length - 1)) * Math.sqrt(252);
+    let peak = idx[0], dd = 0, ddAt = rows[0][0];
+    idx.forEach((v, i) => { peak = Math.max(peak, v); if (v / peak - 1 < dd) { dd = v / peak - 1; ddAt = rows[i][0]; } });
+    const col = (v) => v == null || Math.abs(v) < 0.00005 ? "inherit" : v > 0 ? "var(--sw-green)" : "var(--sw-red)";
+    return `<div class="risk num">
+      <div><span class="k">Rendite ${cagr != null ? "p. a." : "(Zeitraum)"}</span><b style="color:${col(cagr ?? total)}">${pct(cagr ?? total, 2)}</b></div>
+      <div><span class="k">Schwankung p. a.</span><b>${pct(vol, 2, false)}</b></div>
+      <div><span class="k">Max. Rückgang</span><b style="color:${col(dd)}">${pct(dd, 2)}</b><span class="s">${dd < 0 ? new Date(ddAt).toLocaleDateString("de-DE") : ""}</span></div>
+    </div>${days < 365 ? `<div class="note">Kürzer als ein Jahr – Rendite nicht hochgerechnet, Kennzahlen noch wenig aussagekräftig.</div>` : ""}`;
+  }
+
   perfModal(d) {
     if (!this._perf || this._perfLoading) {
       return `<div class="modal" data-perf-close><div class="modal-box" role="dialog" aria-label="Wertentwicklung">
@@ -566,6 +598,7 @@ class SaeulenBase extends HTMLElement {
       <div class="periods">${chips}</div>${miss}
       <div class="parts" style="margin:2px 0 4px">${split}${splitCash}${inv ? `<span>· ${inv}</span>` : ""}</div>
       ${perf.complete ? "" : `<div class="note warn">≈ Kaufhistorie unvollständig – die Gewinne sind eine Annahme mit den heutigen Stückzahlen (Details unten).</div>`}
+      ${this.riskStats(rows, flows)}
       ${this.chart(rows)}
       ${this.positionsTable(perf, cur, d)}
       <div class="note">${src}. ${perf.exact_cash
