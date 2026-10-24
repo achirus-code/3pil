@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.14.0
+
+- Wertentwicklung: Rendite p. a., Schwankung p. a. und maximaler Rückgang für den gewählten Zeitraum – zeitgewichtet, Käufe und Verkäufe verzerren die Werte nicht. Unter einem Jahr wird die Rendite nicht hochgerechnet.
+
 ## 2.13.0
 
 - Schneller: Die Wertentwicklung wird erst beim Öffnen des Popups berechnet (im Hintergrund, mit Ladebalken) und zwischengespeichert. Die Seite lädt dadurch nur noch ~15 KB statt ~275 KB pro Aktualisierung.
